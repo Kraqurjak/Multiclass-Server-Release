@@ -1,4 +1,4 @@
-/*	EQEMu: Everquest Server Emulator
+﻿/*	EQEMu: Everquest Server Emulator
 Copyright (C) 2001-2016 EQEMu Development Team (http://eqemulator.net)
 
 	This program is free software; you can redistribute it and/or modify
@@ -519,38 +519,30 @@ void Mob::WakeTheDead(uint16 spell_id, Corpse *corpse_to_use, Mob *tar, uint32 d
 void Client::ResetAA()
 {
 	SendClearAA();
-	RefundAA();
 
+	// Clear both profile array and aa_ranks container
 	memset(&m_pp.aa_array[0], 0, sizeof(AA_Array) * MAX_PP_AA_ARRAY);
+	aa_ranks.clear();
 
-	int slot_id = 0;
-
-	for (auto& rank_value: aa_ranks) {
-		auto ability_rank = zone->GetAlternateAdvancementAbilityAndRank(rank_value.first, rank_value.second.first);
-		auto ability      = ability_rank.first;
-		auto rank         = ability_rank.second;
-
-		if (!rank) {
-			continue;
-		}
-
-		m_pp.aa_array[slot_id].AA      = rank_value.first;
-		m_pp.aa_array[slot_id].value   = rank_value.second.first;
-		m_pp.aa_array[slot_id].charges = rank_value.second.second;
-		++slot_id;
-	}
-
+	// Clear leadership AAs
 	for (int slot_id = 0; slot_id < _maxLeaderAA; ++slot_id) {
 		m_pp.leader_abilities.ranks[slot_id] = 0;
 	}
-
 	m_pp.group_leadership_points = 0;
-	m_pp.raid_leadership_points  = 0;
-	m_pp.group_leadership_exp    = 0;
-	m_pp.raid_leadership_exp     = 0;
+	m_pp.raid_leadership_points = 0;
+	m_pp.group_leadership_exp = 0;
+	m_pp.raid_leadership_exp = 0;
 
+	// Delete DB rows
 	database.DeleteCharacterAAs(CharacterID());
 	database.DeleteCharacterLeadershipAbilities(CharacterID());
+
+	// Refresh client
+	CalcBonuses();
+	SendEdgeStatBulkUpdate();
+	SendAlternateAdvancementStats();
+	SendAlternateAdvancementPoints();
+	SendAlternateAdvancementTable();
 }
 
 void Client::SendClearAA()
@@ -963,7 +955,23 @@ void Client::SendAlternateAdvancementRank(int aa_id, int level) {
 	aai->spell = rank->spell;
 	aai->spell_type = rank->spell_type;
 	aai->spell_refresh = rank->recast_time;
-	aai->level_req = rank->level_req;
+	// Kraqur:Unlock AAs at level 1 for UI purposes when enabled.
+	//
+	// Server-side requirement remains in rank->level_req.
+	// The client, however, enforces its own level gating in the AA window.
+	//
+	// MQEmu: When IgnoreAALevelRequirements is enabled, override the client-facing
+	// level requirement so the AA appears usable at any level. This affects UI only;
+	// server-side validation still uses rank->level_req unless overridden elsewhere.
+
+	if (RuleB(Custom, IgnoreAALevelRequirements)) {
+		aai->level_req = 1;
+	}
+	else {
+		aai->level_req = rank->level_req;
+	}
+
+
 	aai->current_level = level;
 	aai->max_level = ability->GetMaxLevel(this);
 	aai->prev_id = rank->prev_id;
@@ -1288,17 +1296,48 @@ void Client::IncrementAlternateAdvancementRank(int rank_id) {
 	GrantAlternateAdvancementAbility(rank->base_ability->id, points + 1, true);
 }
 
+// Kraqur: Custom "Bazaar and Back" Origin AA behavior.
+// First activation: save the player's current location (zone, X/Y/Z/H, instance)
+// into character buckets and teleport them to Bazaar.
+// If already in Bazaar, exit early and allow return logic to handle restoring
+// the saved location elsewhere. This replaces the stock Origin AA behavior.
+
 void Client::ActivateAlternateAdvancementAbility(int rank_id, int target_id) {
-	AA::Rank *rank = zone->GetAlternateAdvancementRank(rank_id);
+	AA::Rank* rank = zone->GetAlternateAdvancementRank(rank_id);
 
 	if (!rank) {
 		return;
 	}
 
-	AA::Ability *ability = rank->base_ability;
+	AA::Ability* ability = rank->base_ability;
 	if (!ability) {
 		return;
+
 	}
+	// --- Custom handling for Origin AA ---
+	if (ability->id == aaOrigin) {
+		std::string current_zone = zone->GetShortName();
+		std::transform(current_zone.begin(), current_zone.end(), current_zone.begin(), ::tolower);
+
+		if (current_zone != "bazaar") {
+			SetBucket("Return-Zone", current_zone, "0");
+			SetBucket("Return-X", std::to_string(GetX()), "0");
+			SetBucket("Return-Y", std::to_string(GetY()), "0");
+			SetBucket("Return-Z", std::to_string(GetZ()), "0");
+			SetBucket("Return-H", std::to_string(GetHeading()), "0");
+			if (zone->GetInstanceID() > 0) {
+				SetBucket("Return-Instance", std::to_string(zone->GetInstanceID()), "0");
+			}
+				
+
+			uint32 bazaar_id = ZoneID("bazaar");
+			MovePC(bazaar_id, 0, 0.0f, 0.0f, 0.0f, 0.0f);
+			return; // stop here, don’t fall through to generic AA handling
+		}
+
+		return;
+	}
+	// --- End custom Origin handling ---
 
 	if (!IsValidSpell(rank->spell)) {
 		return;
@@ -1598,8 +1637,16 @@ bool Mob::SetAA(uint32 rank_id, uint32 new_value, uint32 charges)
 	return true;
 }
 
+// Kraqur: Simplified multiclassing AA usage logic.
+// THJ included an additional class‑mask check here using shifted bitmasks,
+// but it was not used anywhere else in the server and conflicted with the
+// client’s own AA visibility filtering. The extra check caused valid AAs to
+// be blocked when multiclassing was enabled.
+//
+// Change: removed the redundant class‑mask expression and now rely on the
+// client AA table for class visibility.
 
-bool Mob::CanUseAlternateAdvancementRank(AA::Rank *rank)
+bool Mob::CanUseAlternateAdvancementRank(AA::Rank* rank)
 {
 	if (!rank) {
 		return false;
@@ -1611,12 +1658,18 @@ bool Mob::CanUseAlternateAdvancementRank(AA::Rank *rank)
 		return false;
 	}
 
-	// Lie to the client about who can use this AA rank if we are multiclassing
+	// MQEmu multiclassing:
+	// Do NOT block AA usage/purchase based on the original class mask.
+	// The client-side AA table already handles visibility.
+	//
 	if (RuleB(Custom, MulticlassingEnabled)) {
-		if (!(IsClient() && ((a->classes >> 1) & this->CastToClient()->GetClassesBits()))) {
+		// Only requirement here: must be a client (not NPC/Bot)
+		if (!IsClient()) {
 			return false;
 		}
-	} else {
+	}
+	else {
+		// Stock single-class behavior
 		if (!(a->classes & (1 << GetClass()))) {
 			return false;
 		}
@@ -1626,20 +1679,18 @@ bool Mob::CanUseAlternateAdvancementRank(AA::Rank *rank)
 	if (
 		a->category == AACategory::ShroudPassive ||
 		a->category == AACategory::ShroudActive
-	) {
+		) {
 		return false;
 	}
 
-	//the one titanium hack i will allow
-	//just to make sure we dont crash the client with newer aas
-	//we'll exclude any expendable ones
+	// Titanium client hack: block expendable AAs
 	if (IsClient() && CastToClient()->ClientVersionBit() & EQ::versions::maskTitaniumAndEarlier) {
 		if (a->charges > 0) {
 			return false;
 		}
 	}
 
-	const int  expansion        = RuleI(Expansion, CurrentExpansion);
+	const int  expansion = RuleI(Expansion, CurrentExpansion);
 	const bool use_expansion_aa = RuleB(Expansion, UseCurrentExpansionAAOnly);
 	if (use_expansion_aa && expansion >= 0) {
 		if (rank->expansion > expansion) {
@@ -1647,23 +1698,23 @@ bool Mob::CanUseAlternateAdvancementRank(AA::Rank *rank)
 		}
 	}
 
-
 	if (IsClient()) {
 		if (rank->expansion && !(CastToClient()->GetPP().expansions & (1 << (rank->expansion - 1)))) {
 			return false;
 		}
-	} else if (IsBot()) {
+	}
+	else if (IsBot()) {
 		if (rank->expansion && !(CastToBot()->GetExpansionBitmask() & (1 << (rank->expansion - 1)))) {
 			return false;
 		}
-	} else {
+	}
+	else {
 		if (rank->expansion && !(RuleI(World, ExpansionSettings) & (1 << (rank->expansion - 1)))) {
 			return false;
 		}
 	}
 
 	auto race = GetPlayerRaceValue(GetBaseRace());
-
 	race = race > PLAYER_RACE_COUNT ? Race::Human : race;
 
 	if (!(a->races & (1 << (race - 1)))) {
@@ -1688,6 +1739,11 @@ bool Mob::CanUseAlternateAdvancementRank(AA::Rank *rank)
 	return true;
 }
 
+// Kraqur: Added IgnoreAALevelRequirements support to AA purchasing.
+// Change: wrapped both level checks in the IgnoreAALevelRequirements rule so
+// level gating can be disabled consistently across AA usage, purchase, and UI.
+// All other purchase logic remains stock EQEmu.
+
 bool Mob::CanPurchaseAlternateAdvancementRank(AA::Rank *rank, bool check_price, bool check_grant)
 {
 	auto a = rank->base_ability;
@@ -1696,9 +1752,13 @@ bool Mob::CanPurchaseAlternateAdvancementRank(AA::Rank *rank, bool check_price, 
 		return false;
 	}
 
-	if (!CanUseAlternateAdvancementRank(rank)) {
-		return false;
+	// MQEmu: ignore level requirement when multiclassing is enabled
+	if (!RuleB(Custom, IgnoreAALevelRequirements)) {
+		if (rank->level_req > GetLevel()) {
+			return false;
+		}
 	}
+
 
 	if (IsClient() && CastToClient()->HasAlreadyPurchasedRank(rank)) {
 		return false;
@@ -1709,9 +1769,12 @@ bool Mob::CanPurchaseAlternateAdvancementRank(AA::Rank *rank, bool check_price, 
 		return false;
 	}
 
-	if (rank->level_req > GetLevel()) {
-		return false;
+	if (!RuleB(Custom, IgnoreAALevelRequirements)) {
+		if (rank->level_req > GetLevel()) {
+			return false;
+		}
 	}
+
 
 	uint32       current_charges = 0;
 	const uint32 points          = GetAA(rank->id, &current_charges);
