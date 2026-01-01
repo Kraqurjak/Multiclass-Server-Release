@@ -1334,6 +1334,10 @@ struct CombatDamage_Struct
 /* 23 */	uint32 special; // 2 = Rampage, 1 = Wild Rampage
 };
 
+// Kraqur: Added new stat entries to match THJ dinput8.dll custom stat support.
+// These values extend the eStatEntry enum so the client can receive and display
+// additional power, haste, crit, and AA-related stats used by the THJ UI layer.
+
 enum eStatEntry
 {
 	eStatClassesBitmask = 1,
@@ -1343,7 +1347,37 @@ enum eStatEntry
 	eStatMaxHP,
 	eStatMaxMana,
 	eStatMaxEndur,
-	eStatDummyValue,
+	eStatATK,
+	eStatAC,
+	eStatSTR,
+	eStatSTA,
+	eStatDEX,
+	eStatAGI,
+	eStatINT,
+	eStatWIS,
+	eStatCHA,
+	eStatMR,
+	eStatFR,
+	eStatCR,
+	eStatPR,
+	eStatDR,
+	eStatWalkspeed,
+	eStatRunspeed,
+	eStatWeight,
+	eStatMaxWeight,
+	eStatMeleePower,
+	eStatSpellPower,
+	eStatHealingPower,
+	eStatMeleeHaste,
+	eStatSpellHaste,
+	eStatHealingHaste,
+	eStatMeleeCrit,
+	eStatSpellCrit,
+	eStatHealingCrit,
+	eStatTotalPower,
+	eStatMitigation,
+	eStatAAPoints,
+	eStatDummyStat,
 	eStatMax
 };
 
@@ -2917,27 +2951,29 @@ struct EnvDamage2_Struct {
 //Bazaar Stuff =D
 //
 
+// No changes were made to upstream EQEmu Bazaar structures in this commit.
+// These are all updates coming from an updated EQemu version.
 enum {
-	BazaarTrader_StartTraderMode = 1,
-	BazaarTrader_EndTraderMode = 2,
-	BazaarTrader_UpdatePrice = 3,
-	BazaarTrader_EndTransaction = 4,
-	BazaarSearchResults = 7,
-	BazaarWelcome = 9,
-	BazaarBuyItem = 10,
-	BazaarTrader_ShowItems = 11,
-	BazaarSearchDone = 12,
-	BazaarTrader_CustomerBrowsing = 13,
-	BazaarInspectItem = 18,
-	BazaarSearchDone2 = 19,
-	BazaarTrader_StartTraderMode2 = 22
+	BazaarTrader_StartTraderMode	= 1,
+	BazaarTrader_EndTraderMode		= 2,
+	BazaarTrader_UpdatePrice		= 3,
+	BazaarTrader_EndTransaction		= 4,
+	BazaarSearchResults				= 7,
+	BazaarWelcome					= 9,
+	BazaarBuyItem					= 10,
+	BazaarTrader_ShowItems			= 11,
+	BazaarSearchDone				= 12,
+	BazaarTrader_CustomerBrowsing	= 13,
+	BazaarInspectItem				= 18,
+	BazaarSearchDone2				= 19,
+	BazaarTrader_StartTraderMode2	= 22
 };
 
 enum {
-	BazaarPriceChange_Fail = 0,
-	BazaarPriceChange_UpdatePrice = 1,
-	BazaarPriceChange_RemoveItem = 2,
-	BazaarPriceChange_AddItem = 3
+	BazaarPriceChange_Fail			= 0,
+	BazaarPriceChange_UpdatePrice	= 1,
+	BazaarPriceChange_RemoveItem	= 2,
+	BazaarPriceChange_AddItem		= 3
 };
 
 struct BazaarWindowStart_Struct {
@@ -2949,6 +2985,7 @@ struct BazaarWindowStart_Struct {
 
 struct BazaarWelcome_Struct {
 	BazaarWindowStart_Struct Beginning;
+	uint32	Action;
 	uint32	Traders;
 	uint32	Items;
 	uint32	Unknown012;
@@ -2957,6 +2994,10 @@ struct BazaarWelcome_Struct {
 
 struct BazaarSearch_Struct {
 	BazaarWindowStart_Struct Beginning;
+	uint32  Action{ 0 };
+	uint32  SearchScope{ 0 }; // 1 all traders 0 local traders
+	uint32  Unknown008{ 0 };
+	uint32  Unknown012{ 0 };
 	uint32	TraderID;
 	uint32	Class_;
 	uint32	Race;
@@ -2966,13 +3007,20 @@ struct BazaarSearch_Struct {
 	char	Name[64];
 	uint32	MinPrice;
 	uint32	MaxPrice;
-	uint32	Minlevel;
-	uint32	MaxLlevel;
+	uint32	MinLevel;
+	uint32	MaxLevel;
+	uint32  MaxResults{ 0 };
+	uint32  Prestige{ 0 };
+	uint32  Augment{ 0 };
+	uint32  TraderEntityID{ 0 };
 };
 struct BazaarInspect_Struct{
-	uint32 ItemID;
-	uint32 Unknown004;
+	uint32 Action;
 	char Name[64];
+	uint32 SerialNumber;
+	uint32 ItemID;
+	uint32 TraderID;
+	
 };
 
 struct NewBazaarInspect_Struct {
@@ -2992,6 +3040,14 @@ struct BazaarReturnDone_Struct{
 	uint32 Unknown012;
 	uint32 Unknown016;
 };
+
+struct BazaarDeliveryCost_Struct {
+	uint32 Action;
+	uint16 VoucherDeliveryCost;
+	float  ParcelDeliverCost; //percentage of item cost
+	uint32 Unknown010;
+};
+
 struct BazaarSearchResults_Struct {
 /*000*/	BazaarWindowStart_Struct Beginning;
 /*004*/	uint32	NumItems;
@@ -3004,6 +3060,7 @@ struct BazaarSearchResults_Struct {
 	// New fields for SoD+, stripped off when encoding for older clients.
 	char	SellerName[64];
 	uint32	ItemID;
+	uint32	ItemID2;
 };
 
 // Barter/Buyer
