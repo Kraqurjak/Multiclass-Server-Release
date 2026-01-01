@@ -1075,18 +1075,19 @@ int16 EQ::InventoryProfile::CalcSlotId(int16 bagslot_id, uint8 bagidx) {
 	return slot_id;
 }
 
-uint8 EQ::InventoryProfile::CalcBagIdx(int16 slot_id) {
+// Kraqur: Updated bag index calculation to support expanded RoF2 bag slot ranges.
+// This is part of the bag-slot overhaul implemented across emu_constants.h,
+// rof2_limits.h, and shareddb.cpp. Ensures correct modulo behavior using
+// invbag::SLOT_COUNT and prevents item overwrite issues with large bags.
+uint8 EQ::InventoryProfile::CalcBagIdx(int16 slot_id)
+{
 	uint8 index = 0;
-
-	// this is not a bag range... using this risks over-writing existing items
-	//else if (slot_id >= EmuConstants::BANK_BEGIN && slot_id <= EmuConstants::BANK_END)
-	//	index = (slot_id - EmuConstants::BANK_BEGIN) % EmuConstants::ITEM_CONTAINER_SIZE;
 
 	if (slot_id >= invbag::GENERAL_BAGS_BEGIN && slot_id <= invbag::GENERAL_BAGS_END) {
 		index = (slot_id - invbag::GENERAL_BAGS_BEGIN) % invbag::SLOT_COUNT;
 	}
 	else if (slot_id >= invbag::CURSOR_BAG_BEGIN && slot_id <= invbag::CURSOR_BAG_END) {
-		index = (slot_id - invbag::CURSOR_BAG_BEGIN); // % invbag::SLOT_COUNT; - not needed since range is 10 slots
+		index = (slot_id - invbag::CURSOR_BAG_BEGIN) % invbag::SLOT_COUNT;
 	}
 	else if (slot_id >= invbag::BANK_BAGS_BEGIN && slot_id <= invbag::BANK_BAGS_END) {
 		index = (slot_id - invbag::BANK_BAGS_BEGIN) % invbag::SLOT_COUNT;
@@ -1098,7 +1099,7 @@ uint8 EQ::InventoryProfile::CalcBagIdx(int16 slot_id) {
 		index = (slot_id - invbag::TRADE_BAGS_BEGIN) % invbag::SLOT_COUNT;
 	}
 	else if (slot_id >= invslot::WORLD_BEGIN && slot_id <= invslot::WORLD_END) {
-		index = (slot_id - invslot::WORLD_BEGIN); // % invbag::SLOT_COUNT; - not needed since range is 10 slots
+		index = (slot_id - invslot::WORLD_BEGIN) % invbag::SLOT_COUNT;
 	}
 
 	return index;
