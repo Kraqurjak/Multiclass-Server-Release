@@ -1,0 +1,142 @@
+============================================================
+THJ MULTICLASS SERVER - RELEASE NOTES
+============================================================
+
+Release 1 - 12/6/2025
+
+Core Multiclass System
+Multiclassing is fully implemented using a bitmask system.
+All class checks (combat, spells, AAs, items, bonuses, etc.) now support multiclass logic.
+Spell bars, spell book, scribing, and memorization now work for all classes you have unlocked.
+Abilities and disciplines follow the same multiclass rules.
+AA abilities can be used starting at level 51.
+
+Item and Database Changes
+All items in the database have been updated to ALL/ALL to support multiclass equipment rules.
+You can equip any item that any of your 3 classes can use.
+Evolving items do NOT work at this time.
+
+Client and UI Notes
+THJ client included (thj-client.rar).
+Only the Default UI is currently supported. Other UIs will be fixed later.
+
+Bazaar and Class Unlocking
+Bazaar and Back AA recast time changed to 5 seconds. You can revert this in the database.
+
+To begin multiclassing:
+Go to the Bazaar.
+Talk to two guild masters to choose your classes.
+Add the Bazaar and Back AA to your hotbar.
+Vision of Ayonae is unlocked and can be used freely to switch classes.
+
+Zone and Instance Changes
+Echo of the Past added to all THJ zones.
+Respawning and non-respawning instances are working.
+Bosses spawn correctly in non-respawning instances.
+Lockouts have been removed or reduced.
+
+New command: #respawn <seconds>
+Example: #respawn 300 sets respawn to 5 minutes.
+Example: #respawn 0 resets to normal spawn rate.
+
+Travel and Waypoints
+Waypoint unlocking removed.
+Tearel (now a dragon) in Bazaar provides teleport popups to THJ zones and expeditions.
+
+Progression and Quests
+All progression quests are included but not yet updated for multiclass logic.
+You may add or modify them as needed.
+
+General Notes
+A large amount of SQL rebuilding and server-side work was completed.
+Multiclassing alone required weeks of fixes and rewrites.
+This release is stable and ready for players.
+
+============================================================
+Release 2 - 1/1/2026
+============================================================
+
+AA System Updates
+AAs can now be used starting at level 1.
+AA class restrictions are bypassed when multiclassing is active.
+
+Bard Fixes
+Beneficial bard songs no longer fade instantly.
+/melody still does not function.
+
+Multiclass Pet System (Major Feature)
+A full multiclass pet system has been built from scratch.
+You can now have multiple pets if you have more than one pet class.
+Each pet is tracked, zoned, saved, and restored independently.
+Pet AI, hate, assist, defend, and follow logic now iterate all pets.
+Pet buffs work, but only the primary pet shows buff icons.
+Extended target window does NOT auto-populate pets yet.
+Pet UI only shows the primary pet (client limitation).
+
+Two control systems now exist:
+
+GLOBAL PET COMMANDS (affect all pets)
+These are normal /pet commands, but now global:
+/pet attack
+/pet qattack
+/pet backoff
+/pet follow
+/pet guard
+/pet regroup
+/pet stop
+/pet sit
+/pet health
+/pet getlost
+All pets respond instantly.
+
+CLASS-SPECIFIC PET COMMANDS (#petcmd)
+Syntax:
+#petcmd <class or all> <command>
+
+Examples:
+#petcmd mag attack
+#petcmd bst attack
+#petcmd all attack
+#petcmd mag taunton
+
+Supported classes:
+mag nec bst all
+
+Supported commands:
+health
+leader
+attack
+qattack
+follow
+guard
+sit
+siton
+sitoff
+taunt
+taunton
+tauntoff
+hold
+holdon
+holdoff
+spellhold
+focus
+feigh
+backoff
+getlost
+regroup
+
+Notes:
+#petcmd overrides global behavior for that class.
+You can fine tune each pet class independently.
+This system is server-side only and does not require client mods.
+
+Known Limitations
+Extended target window does not auto-populate pets.
+Melody does not work.
+Some UI elements require zoning to refresh.
+Evolving items still do not function.
+Progression quests not yet updated for multiclass logic.
+
+============================================================
+END OF RELEASE NOTES
+============================================================
