@@ -43,7 +43,11 @@ void EQEmuConfig::parse_config()
 
 	if (_root["server"]["world"]["loginserver"].isObject()) {
 		LoginHost   = _root["server"]["world"]["loginserver"].get("host", "login.eqemulator.net").asString();
-		LoginPort   = Strings::ToUnsignedInt(_root["server"]["world"]["loginserver"].get("port", "5998").asString());
+		// Kraqur: Updated default loginserver port from 5998 to 5999.
+		// RoF2 uses the newer login protocol served on port 5999. This ensures the
+		// server appears correctly in the RoF2 login list and prevents older clients
+		// (Titanium/SoF/SoD/UF) from connecting, enforcing RoF2-only compatibility.
+		LoginPort   = Strings::ToUnsignedInt(_root["server"]["world"]["loginserver"].get("port", "5999").asString());
 		LoginLegacy = false;
 		if (_root["server"]["world"]["loginserver"].get("legacy", "0").asString() == "1") { LoginLegacy = true; }
 		LoginAccount  = _root["server"]["world"]["loginserver"].get("account", "").asString();
@@ -66,7 +70,11 @@ void EQEmuConfig::parse_config()
 
 			auto loginconfig = new LoginConfig;
 			loginconfig->LoginHost     = _root["server"]["world"][str].get("host", "login.eqemulator.net").asString();
-			loginconfig->LoginPort     = Strings::ToUnsignedInt(_root["server"]["world"][str].get("port", "5998").asString());
+			// Kraqur: Updated default loginserver port from 5998 to 5999.
+			// RoF2 uses the newer login protocol served on port 5999. This ensures the
+			// server appears correctly in the RoF2 login list and prevents older clients
+			// (Titanium/SoF/SoD/UF) from connecting, enforcing RoF2-only compatibility.
+			loginconfig->LoginPort     = Strings::ToUnsignedInt(_root["server"]["world"][str].get("port", "5999").asString());
 			loginconfig->LoginAccount  = _root["server"]["world"][str].get("account", "").asString();
 			loginconfig->LoginPassword = _root["server"]["world"][str].get("password", "").asString();
 
