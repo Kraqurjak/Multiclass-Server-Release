@@ -71,15 +71,18 @@ SpawnGroup::SpawnGroup(
 
 uint32 SpawnGroup::GetNPCType(uint16 in_filter)
 {
-	int npcType     = 0;
 	int totalchance = 0;
 
+	// kraqur: --- Group spawn limit check ---
 	if (!entity_list.LimitCheckGroup(id, group_spawn_limit)) {
-		return (0);
+		return 0;
 	}
 
-	std::list<SpawnEntry *> possible;
-	for (auto &it : list_) {
+	// Kraqur: --- Build candidate list ---
+	// Consolidated formatting and removed duplicate variable declaration. 
+	// Each SpawnEntry is checked against type limits, time windows, and filters.
+	std::list<SpawnEntry*> possible;
+	for (auto& it : list_) {
 		auto se = it.get();
 
 		if (!entity_list.LimitCheckType(se->NPCType, se->npc_spawn_limit)) {
@@ -104,19 +107,117 @@ uint32 SpawnGroup::GetNPCType(uint16 in_filter)
 		return 0;
 	}
 
-	int32 roll = 0;
-	roll = zone->random.Int(0, totalchance - 1);
+	// Kraqur: Custom spawn override logic.
+	// Applies special spawn behavior inside static and farming expeditions.
+	// Static expeditions force the lowest-chance entry (boss).
+	// Farming expeditions exclude the lowest-chance entry (raid) and block
+	// single-entry groups from spawning.
 
+	if (zone) {
+		const int static_ver = RuleI(Custom, StaticInstanceVersion);   // now 101
+		const int farming_ver = RuleI(Custom, FarmingInstanceVersion);  // now 100
+
+		const bool static_on = RuleB(Custom, StaticInstanceMode);
+		const bool farming_on = RuleB(Custom, FarmingInstanceMode);
+
+		const int cur_ver = zone->GetInstanceVersion();
+
+		//Kraqur: Static expedition logic.
+		// When inside a static expedition, always spawn the lowest-chance entry.
+		// This forces named or boss mobs to appear instead of trash.
+		// If multiple entries share the same lowest chance, pick one at random.
+
+		if (cur_ver == static_ver && static_on) {
+			int lowestChance = INT_MAX;
+			std::vector<SpawnEntry*> lowestEntries;
+
+			for (auto se : possible) {
+				if (se->chance < lowestChance) {
+					lowestChance = se->chance;
+					lowestEntries.clear();
+					lowestEntries.push_back(se);
+				}
+				else if (se->chance == lowestChance) {
+					lowestEntries.push_back(se);
+				}
+			}
+
+			if (!lowestEntries.empty()) {
+				auto it = lowestEntries.begin();
+				std::advance(it, zone->random.Int(0, static_cast<int>(lowestEntries.size()) - 1));
+				return (*it)->NPCType;
+			}
+		}
+
+		// Kraqur: Farming expedition logic.
+		// When inside a farming expedition:
+		// - Block single-entry spawn groups (return no spawn).
+		// - Identify the lowest-chance entry (usually raid or named).
+		// - Remove the lowest-chance entry from the candidate list.
+		// - If all remaining entries have equal chance, pick one at random.
+		// - Otherwise, perform a weighted roll using the filtered list.
+		else if (cur_ver == farming_ver && farming_on) {
+			if (possible.size() == 1) {
+				return 0; // no spawn
+			}
+
+			int lowestChance = INT_MAX;
+			for (auto se : possible) {
+				if (se->chance < lowestChance) {
+					lowestChance = se->chance;
+				}
+			}
+
+			std::vector<SpawnEntry*> filtered;
+			int totalchanceFiltered = 0;
+			for (auto se : possible) {
+				if (se->chance != lowestChance) {
+					filtered.push_back(se);
+					totalchanceFiltered += se->chance;
+				}
+			}
+
+			if (!filtered.empty()) {
+				bool allEqual = true;
+				int firstChance = filtered.front()->chance;
+				for (auto se : filtered) {
+					if (se->chance != firstChance) {
+						allEqual = false;
+						break;
+					}
+				}
+
+				if (allEqual) {
+					auto it = filtered.begin();
+					std::advance(it, zone->random.Int(0, static_cast<int>(filtered.size()) - 1));
+					return (*it)->NPCType;
+				}
+
+				int32 roll = zone->random.Int(0, totalchanceFiltered - 1);
+				for (auto se : filtered) {
+					if (roll < se->chance) {
+						return se->NPCType;
+					}
+					roll -= se->chance;
+				}
+			}
+		}
+		// Any other instance version or flags disabled  fall through
+	}
+
+	// Normal zone or non-expedition fallback.
+	// If no special expedition rules apply, perform the standard weighted roll
+	// across all possible entries.
+
+	int32 roll = zone->random.Int(0, totalchance - 1);
 	for (auto se : possible) {
 		if (roll < se->chance) {
-			npcType = se->NPCType;
-			break;
+			return se->NPCType;
 		}
-		else {
-			roll -= se->chance;
-		}
+		roll -= se->chance;
 	}
-	return npcType;
+
+	return 0;
 }
 
 void SpawnGroup::AddSpawnEntry(std::unique_ptr<SpawnEntry> &newEntry)
