@@ -414,25 +414,52 @@ void Spawn2::ForceDespawn()
 	timer.Start(cur);
 }
 
+// Kraqur: DeathReset:
+// Handles respawn timing when an NPC dies. This function calculates the
+// next respawn time using the normal variance logic unless a respawn
+// override has been set for the zone.
+//
+// The in-game GM command "#respawn <seconds>" sets zone->respawn_override
+// to a value in seconds. When inside a farming instance and the override
+// is greater than zero, this function forces the respawn timer to use
+// that override value (converted to milliseconds).
+//
+// Example scenarios:
+// #respawn 0 = reset to default respawn time
+// #respawn 30 = respawn every 30 seconds
+// #respawn 300 = respawn every 5 minutes
+// 
+// Summary of behavior:
+// - Uses resetTimer() for normal respawn variance.
+// - If in a farming instance and respawn_override > 0, override the timer.
+// - Starts the respawn timer with the final chosen value.
+// - Clears the NPC pointer and increments killcount if needed.
+// - Updates the database with the new respawn time if spawn2_id is valid.
+
 //resets our spawn as if we just died
 void Spawn2::DeathReset(bool realdeath)
 {
-	//get our reset based on variance etc and store it locally
+	// calculate base respawn time using variance logic
 	uint32 cur = resetTimer();
-	//set our timer to our reset local
+
+	if (zone && zone->GetInstanceVersion() == RuleI(Custom, FarmingInstanceVersion) && zone->respawn_override > 0) {
+		cur = zone->respawn_override * 1000;
+	}
+
+	// start the respawn timer with the chosen value
 	timer.Start(cur);
 
-	//zero out our NPC since he is now gone
+	// clear the NPC pointer since it is now gone
 	npcthis = nullptr;
 
-	if(realdeath) { killcount++; }
+	// increment kill count if this was a real death
+	if (realdeath) {
+		killcount++;
+	}
 
-	//if we have a valid spawn id
-	if(spawn2_id)
-	{
-		database.UpdateRespawnTime(spawn2_id, zone->GetInstanceID(), (cur/1000));
-		LogSpawns("Spawn2 [{}]: Spawn reset by death, repop in [{}] ms", spawn2_id, timer.GetRemainingTime());
-		//store it to database too
+	// update respawn time in the database if we have a valid spawn id
+	if (spawn2_id) {
+		database.UpdateRespawnTime(spawn2_id, zone->GetInstanceID(), (cur / 1000));
 	}
 }
 
