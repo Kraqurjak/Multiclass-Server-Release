@@ -8054,14 +8054,32 @@ std::string Mob::GetBucketRemaining(std::string bucket_name)
 	return {};
 }
 
+// Kraqur: Add detailed bucket write instrumentation for debugging and traceability
 void Mob::SetBucket(std::string bucket_name, std::string bucket_value, std::string expiration)
 {
+	// Use {} placeholders, not %s
+	LogDebug("Mob::SetBucket [{}] (ID={}, Type={}, Caller={}): key={}, value={}, expires={}",
+		GetName(),
+		GetID(),
+		IsClient() ? "Client" : (IsNPC() ? "NPC" : (IsBot() ? "Bot" : "Other")),
+		__FUNCTION__,
+		bucket_name,
+		bucket_value,
+		expiration);
+
 	DataBucketKey k = GetScopedBucketKeys();
-	k.key     = bucket_name;
+	k.key = bucket_name;
 	k.expires = expiration;
-	k.value   = bucket_value;
+	k.value = bucket_value;
 
 	DataBucket::SetData(k);
+
+	if (IsClient()) {
+		Client* c = CastToClient();
+		if (c) {
+			c->SaveBucket(bucket_name, bucket_value);
+		}
+	}
 }
 
 std::string Mob::GetMobDescription()
