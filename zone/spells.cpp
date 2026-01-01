@@ -1929,34 +1929,48 @@ void Mob::CastedSpellFinished(uint16 spell_id, uint32 target_id, CastingSlot slo
 		}
 	}
 
-	if(bard_song_mode)
-	{
-		if(IsClient())
-		{
-			Client *c = CastToClient();
-			if((IsFromItem  && RuleB(Character, SkillUpFromItems)) || !IsFromItem) {
+	if (bard_song_mode) {
+		if (IsClient()) {
+			Client* c = CastToClient();
+
+			if ((IsFromItem && RuleB(Character, SkillUpFromItems)) || !IsFromItem) {
 				c->CheckSongSkillIncrease(spell_id);
 			}
+
 			if (spells[spell_id].timer_id > 0 && slot < CastingSlot::MaxGems) {
-				c->SetLinkedSpellReuseTimer(spells[spell_id].timer_id, (spells[spell_id].recast_time / 1000) - (casting_spell_recast_adjust / 1000));
+				c->SetLinkedSpellReuseTimer(
+					spells[spell_id].timer_id,
+					(spells[spell_id].recast_time / 1000) - (casting_spell_recast_adjust / 1000)
+				);
 			}
+
 			if (RuleB(Spells, EnableBardMelody)) {
-				c->MemorizeSpell(static_cast<uint32>(slot), spell_id, memSpellSpellbar, casting_spell_recast_adjust);
+				c->MemorizeSpell(
+					static_cast<uint32>(slot),
+					spell_id,
+					memSpellSpellbar,
+					casting_spell_recast_adjust
+				);
 			}
 
 			if (!IsFromItem) {
 				c->CheckSongSkillIncrease(spell_id);
-			}			
-
-			/*
+			}
+			// Kraqur: Restored bard song cleanup path. SendSpellBarEnable() and
+			// ZeroBardPulseVars() were previously disabled, which prevented proper
+			// bard song termination and caused the spell bar to remain locked.
+			// Re-enabling this ensures bard songs reset correctly and melody works.
 			if (RuleB(Custom, MulticlassingEnabled)) {
 				c->SendSpellBarEnable(spell_id);
 				ZeroBardPulseVars();
 			}
-			*/
 		}
+
 		LogSpells("Bard song [{}] should be started", spell_id);
 	}
+
+
+
 	else
 	{
 		if(IsClient())

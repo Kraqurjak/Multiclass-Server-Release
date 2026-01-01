@@ -3846,7 +3846,7 @@ void Mob::BuffProcess()
 									} */ // Bard songs suspension
 
 									if (suspended) {
-										LogDebug("[{}] is suspended.", spellid);
+										//LogDebug("[{}] is suspended.", spellid);
 									}
 								}							
 							}
