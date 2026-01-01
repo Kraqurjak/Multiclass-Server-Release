@@ -117,6 +117,10 @@ public:
 	bool IsIdleWhenEmpty() const;
 	void SetIdleWhenEmpty(bool idle_when_empty);
 	uint32 GetSecondsBeforeIdle() const;
+	// Kraqur: Respawn override value used by the "#respawn <seconds>" command.
+	// Stored in seconds. A value of 0 disables the override and uses default timers.
+	// Used by Spawn2::DeathReset() to force respawn timing inside farming instances.
+	uint32 respawn_override = 0; // default disabled, in seconds
 	void SetSecondsBeforeIdle(uint32 seconds_before_idle);
 	bool AggroLimitReached() { return (aggroedmobs > 10) ? true : false; }
 	bool AllowMercs() const { return (allow_mercs); }
