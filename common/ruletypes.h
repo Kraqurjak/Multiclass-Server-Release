@@ -947,11 +947,46 @@ RULE_BOOL(Items, DisablePotionBelt, false, "Enable this to disable Potion Belt I
 RULE_BOOL(Items, DisableSpellFocusEffects, false, "Enable this to disable Spell Focus Effects on Items")
 RULE_CATEGORY_END()
 
+// Kraqur: Custom rules added for new gameplay systems.
+// These rules control seasonal characters, expedition behavior,
+// respawn overrides, and AA level requirement bypassing.
+//
+// Added rules:
+//
+// EnableSeasonalCharacters:
+//   Toggles the seasonal character system.
+//
+// FarmingInstanceMode / StaticInstanceMode:
+//   Enable custom expedition behavior.
+//   Farming = respawning, no bosses.
+//   Static  = non-respawning, bosses forced.
+//
+// FarmingInstanceVersion / StaticInstanceVersion:
+//   Instance version IDs used to identify farming and static expeditions.
+//
+// RespawnOverride:
+//   Default override value (in seconds) for farming instances.
+//   Used by the "#respawn <seconds>" command.
+//   A value of 0 disables the override.
+//
+// IgnoreAALevelRequirements:
+//   Allows bypassing AA level gating for UI and usage.
+//
+// These rules are isolated to the Custom category and do not modify
+// any existing THJ rules.
+
 RULE_CATEGORY(Custom)
 RULE_BOOL(Custom, ServerAuthStats, true, "Enable this rule in order to send explicit client updates. Requires client dll.")
 RULE_BOOL(Custom, MulticlassingEnabled, true, "Enable this to enable all multiclass-related tweaks. Requires ServerAuthStats enabled.")
 RULE_BOOL(Custom, SuspendGroupBuffs, true, "Enable this to cause self buffs and group's buffs to not tick down")
 RULE_BOOL(Custom, FadeNPCDebuffsOutofCombat, true, "Enable to to cause NPCs to lose all buffs automatically when combat ends")
+RULE_BOOL(Custom, EnableSeasonalCharacters, false, "Enable seasonal character system") 
+RULE_BOOL(Custom, FarmingInstanceMode, true, "Enable farming expedition behavior (exclude raid mobs + block single-entry groups)")
+RULE_BOOL(Custom, StaticInstanceMode, false, "Enable static expedition behavior (boss forcing + no respawns)")
+RULE_INT(Custom, FarmingInstanceVersion, 100, "Version ID for respawning/farming instances")
+RULE_INT(Custom, StaticInstanceVersion, 101, "Version ID for non-respawning instances")
+RULE_INT(Custom, RespawnOverride, 0, "Default respawn override in seconds for farming instances (version 100). 0 = disabled")
+RULE_BOOL(Custom, IgnoreAALevelRequirements, false)
 RULE_CATEGORY_END()
 
 #undef RULE_CATEGORY
