@@ -1576,71 +1576,82 @@ void Client::OPMoveCoin(const EQApplicationPacket* app)
 	SaveCurrency();
 }
 
-void Client::OPGMTraining(const EQApplicationPacket *app)
+void Client::OPGMTraining(const EQApplicationPacket* app)
 {
-
 	EQApplicationPacket* outapp = app->Copy();
-	GMTrainee_Struct* gmtrain = (GMTrainee_Struct*) outapp->pBuffer;
+	GMTrainee_Struct* gmtrain = (GMTrainee_Struct*)outapp->pBuffer;
 
 	Mob* pTrainer = entity_list.GetMob(gmtrain->npcid);
 
-	if (!pTrainer || !pTrainer->IsNPC() || pTrainer->GetClass() < Class::WarriorGM || pTrainer->GetClass() > Class::BerserkerGM) {
+	if (!pTrainer || !pTrainer->IsNPC() ||
+		pTrainer->GetClass() < Class::WarriorGM ||
+		pTrainer->GetClass() > Class::BerserkerGM) {
+		safe_delete(outapp);
 		return;
 	}
 
 	int trains_class = pTrainer->GetClass() - (Class::WarriorGM - Class::Warrior);
 
-	if (!RuleB(Character, AllowCrossClassTrainers)) {		
-		if (GetClass() != trains_class) {
-			Message(Chat::White, "You are not a member of the %s class guild.  Begone.", class_names[GetClass()]);
-			safe_delete(outapp);
-			return;
-		}
-	} 
+	// --- FIX: use bitmask instead of single class ---
+	// Multiclassing: use class bitmask instead of single-class check
+	int classes_bits = GetClassesBits();                // full bitmask of all classes the client has
+	int trains_class_bit = 1 << (trains_class - 1);     // compute bit for the trainer's class
 
-	//you have to be somewhat close to a trainer to be properly using them
-	if (DistanceSquared(m_Position,pTrainer->GetPosition()) > USE_NPC_RANGE2) {
+	// If cross-class training is disabled, require the player to actually have this class
+	if (!RuleB(Character, AllowCrossClassTrainers)) {
+		if (!(classes_bits & trains_class_bit)) {       // player does not have this class in their bitmask
+			Message(Chat::White,
+				"You are not a member of the %s class guild. Begone.",
+				class_names[trains_class]);
+			safe_delete(outapp);
+			return;                                     // block training for classes the player does not own
+		}
+	}
+
+	// --- END FIX ---
+
+	// must be close enough to trainer
+	if (DistanceSquared(m_Position, pTrainer->GetPosition()) > USE_NPC_RANGE2) {
 		safe_delete(outapp);
 		return;
 	}
 
-	// if this for-loop acts up again (crashes linux), try enabling the before and after #pragmas
-	//#pragma GCC push_options
-	//#pragma GCC optimize ("O0")
-	int classes_bits = GetClassesBits(); // Get the bitmask representing the character's classes
-	int trains_class_bit = 1 << (trains_class - 1); // Calculate the bit for trains_class (adjusting for 0-indexing)
-
+	// build skill array
 	for (int sk = EQ::skills::Skill1HBlunt; sk <= EQ::skills::HIGHEST_SKILL; ++sk) {
 		if (!(classes_bits & trains_class_bit)) {
-			gmtrain->skills[sk] = 0; // If trains_class isn't represented in our classes, set skill to 0
-			continue; // Skip the rest of the loop and continue with the next skill
+			gmtrain->skills[sk] = 0;
+			continue;
 		}
-		
-		if (sk == EQ::skills::SkillTinkering && GetRace() != GNOME) {
-			gmtrain->skills[sk] = 0; // Non-gnomes can't tinker!
-		} else {
-			gmtrain->skills[sk] = GetMaxSkillAfterSpecializationRules((EQ::skills::SkillType)sk, MaxSkillOriginal((EQ::skills::SkillType)sk, trains_class, RuleI(Character, MaxLevel)));
-			// This is the highest level that the trainer can train you to, this is enforced clientside so we can't just
-			// set it to 1 with CanHaveSkill or you won't be able to train past 1.
-		}
-	}	
 
-	if (ClientVersion() < EQ::versions::ClientVersion::RoF2 && GetClass() == Class::Berserker) {
-		gmtrain->skills[EQ::skills::Skill1HPiercing] = gmtrain->skills[EQ::skills::Skill2HPiercing];
+		if (sk == EQ::skills::SkillTinkering && GetRace() != GNOME) {
+			gmtrain->skills[sk] = 0;
+		}
+		else {
+			gmtrain->skills[sk] = GetMaxSkillAfterSpecializationRules(
+				(EQ::skills::SkillType)sk,
+				MaxSkillOriginal((EQ::skills::SkillType)sk, trains_class,
+					RuleI(Character, MaxLevel)));
+		}
+	}
+
+	if (ClientVersion() < EQ::versions::ClientVersion::RoF2 &&
+		GetClass() == Class::Berserker) {
+		gmtrain->skills[EQ::skills::Skill1HPiercing] =
+			gmtrain->skills[EQ::skills::Skill2HPiercing];
 		gmtrain->skills[EQ::skills::Skill2HPiercing] = 0;
 	}
-//#pragma GCC pop_options
 
-	uchar ending[]={0x34,0x87,0x8a,0x3F,0x01
-		,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9
-		,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9
-		,0x76,0x75,0x3f};
-	memcpy(&outapp->pBuffer[outapp->size-40],ending,sizeof(ending));
+	uchar ending[] = {
+		0x34,0x87,0x8a,0x3F,0x01,
+		0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,
+		0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,0xC9,
+		0x76,0x75,0x3f
+	};
+	memcpy(&outapp->pBuffer[outapp->size - 40], ending, sizeof(ending));
 	FastQueuePacket(&outapp);
 
 	// welcome message
-	if (pTrainer && pTrainer->IsNPC())
-	{
+	if (pTrainer && pTrainer->IsNPC()) {
 		pTrainer->SayString(zone->random.Int(1204, 1207), GetCleanName());
 	}
 }
