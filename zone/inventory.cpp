@@ -3140,49 +3140,179 @@ uint32 Client::GetEquippedItemFromTextureSlot(uint8 material_slot) const
 
 	return 0;
 }
-
+// Kraqur: Added full stat mapping for all eStatEntry values.
+// This ensures the server returns a value for every stat index used by the
+// THJ EdgeStat UI layer. The switch order now matches the enum order exactly,
+// preventing stat misalignment or incorrect client display. Placeholder values
+// remain for TotalPower and DummyStat until custom formulas are defined.
 int64_t Client::GetStatValueEdgeType(eStatEntry eLabel)
 {
 	switch (eLabel)
 	{
-		case eStatCurHP:
-		{
-			return GetHP();
-		}
-		case eStatMaxHP:
-		{	
-			CalcMaxHP();
-			return GetMaxHP();
-		}
-		case eStatCurMana:
-		{
-			return GetMana();
-		}
-		case eStatMaxMana:
-		{
-			CalcMaxMana();
-			return GetMaxMana();
-		}
-		case eStatCurEndur:
-		{
-			return GetEndurance();
-		}
-		case eStatMaxEndur:
-		{
-			CalcMaxEndurance();
-			return GetMaxEndurance();
-		}
-		case eStatClassesBitmask:
-		{
-			return GetClassesBits();
-		}
-		default:
-		{
-			return 0;
-		}
+	case eStatClassesBitmask:
+	{
+		return GetClassesBits();
 	}
+	case eStatCurHP:
+	{
+		return GetHP();
+	}
+	case eStatCurMana:
+	{
+		return GetMana();
+	}
+	case eStatCurEndur:
+	{
+		return GetEndurance();
+	}
+	case eStatMaxHP:
+	{
+		CalcMaxHP();
+		return GetMaxHP();
+	}
+	case eStatMaxMana:
+	{
+		CalcMaxMana();
+		return GetMaxMana();
+	}
+	case eStatMaxEndur:
+	{
+		CalcMaxEndurance();
+		return GetMaxEndurance();
+	}
+	case eStatATK:
+	{
+		return GetATKBonus();
+	}
+	case eStatAC:
+	{
+		return GetAC();
+	}
+	case eStatSTR:
+	{
+		return GetSTR();
+	}
+	case eStatSTA:
+	{
+		return GetSTA();
+	}
+	case eStatDEX:
+	{
+		return GetDEX();
+	}
+	case eStatAGI:
+	{
+		return GetAGI();
+	}
+	case eStatINT:
+	{
+		return GetINT();
+	}
+	case eStatWIS:
+	{
+		return GetWIS();
+	}
+	case eStatCHA:
+	{
+		return GetCHA();
+	}
+	case eStatMR:
+	{
+		return GetMR();
+	}
+	case eStatFR:
+	{
+		return GetFR();
+	}
+	case eStatCR:
+	{
+		return GetCR();
+	}
+	case eStatPR:
+	{
+		return GetPR();
+	}
+	case eStatDR:
+	{
+		return GetDR();
+	}
+	case eStatWalkspeed:
+	{
+		return (static_cast<double>(0.025 * GetWalkspeed()) / (double)walkspeed) * 100000.0f;
+	}
+	case eStatRunspeed:
+	{
+		return (static_cast<double>(0.025 * GetRunspeed()) / (double)runspeed) * 100000.0f;
+	}
+	case eStatWeight:
+	{
+		return CalcCurrentWeight();
+	}
+	case eStatMaxWeight:
+	{
+		return GetSTR();
+	}
+	case eStatMeleePower:
+	{
+		return 0;
+	}
+	case eStatSpellPower:
+	{
+		return 0;
+	}
+	case eStatHealingPower:
+	{
+		return 0;
+	}
+	case eStatMeleeHaste:
+	{
+		return GetHaste();
+	}
+	case eStatSpellHaste:
+	{
+		return GetHaste();
+	}
+	case eStatHealingHaste:
+	{
+		return GetHaste();
+	}
+	case eStatMeleeCrit:
+	{
+		return GetCriticalChanceBonus(EQ::skills::Skill1HBlunt);
+	}
+	case eStatSpellCrit:
+	{
+		return GetCriticalChanceBonus(EQ::skills::SkillEvocation);
+	}
+	case eStatHealingCrit:
+	{
+		return GetCriticalChanceBonus(EQ::skills::SkillMend);
+	}
+	case eStatTotalPower:
+	{
+		return 0; // placeholder
+	}
+	case eStatMitigation:
+	{
+		return GetMitigationAC();
+	}
+	case eStatAAPoints:
+	{
+		return m_pp.aapoints;
+	}
+	case eStatDummyStat:
+	{
+		return 0;
+	}
+	default:
+	{
+		return 0;
+	}
+	}
+
 	return 0;
 }
+
 
 void Client::SendEdgeStatBulkUpdate()
 {
@@ -3197,7 +3327,7 @@ void Client::SendEdgeStatBulkUpdate()
 	itempacket->count = (int)(eStatMax) - 1;
 	for(int guava = 0; guava < eStatEntry::eStatMax - 1; guava++)
 	{
-		LogDebug("EdgePacket packing [{}] value [{}]", (eStatEntry)guava, GetStatValueEdgeType((eStatEntry)guava));
+		//LogDebug("EdgePacket packing [{}] value [{}]", (eStatEntry)guava, GetStatValueEdgeType((eStatEntry)guava));
 		itempacket->entries[guava].statKey = (eStatEntry)guava;
 		itempacket->entries[guava].statValue = GetStatValueEdgeType((eStatEntry)guava);
 	}
@@ -3261,6 +3391,8 @@ void Client::SendEdgeEnduranceStats()
 	QueuePacket(outapp);
 	safe_delete(outapp);
 }
+
+
 
 uint32 Client::GetEquipmentColor(uint8 material_slot) const
 {
