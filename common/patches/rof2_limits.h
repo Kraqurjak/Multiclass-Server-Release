@@ -194,18 +194,20 @@ namespace RoF2
 		const char* GetInvSlotName(int16 inv_type, int16 inv_slot);
 
 	} /*invslot*/
-
 	namespace invbag {
 		inline EQ::versions::ClientVersion GetInvBagRef() { return EQ::versions::ClientVersion::RoF2; }
 
 		const int16 SLOT_INVALID = IINVALID;
 		const int16 SLOT_BEGIN = INULL;
-		const int16 SLOT_END = 9; //254;
-		const int16 SLOT_COUNT = 10; //255; // server Size will be 255..unsure what actual client is (test)
+		// Kraqur: Override RoF2 bag slot limit. Default RoF2 client uses 10-slot bags,
+		// but server supports expanded container sizes. Set SLOT_COUNT to 255 and
+		// recalculate SLOT_END based on the new value.
+		const int16 SLOT_COUNT = 255; 
+		const int16 SLOT_END = SLOT_BEGIN + SLOT_COUNT - 1; 
 
 		const char* GetInvBagIndexName(int16 bag_index);
+	}
 
-	} /*invbag*/
 
 	namespace invaug {
 		inline EQ::versions::ClientVersion GetInvAugRef() { return EQ::versions::ClientVersion::RoF2; }

@@ -1231,7 +1231,10 @@ void SharedDatabase::LoadItems(void *data, uint32 size, int32 items, uint32 max_
 
 		// Bag
 		item.BagSize = static_cast<uint8>(Strings::ToUnsignedInt(row[ItemField::bagsize]));
-		item.BagSlots = static_cast<uint8>(EQ::Clamp(Strings::ToInt(row[ItemField::bagslots]), 0, 10)); // Will need to be changed from std::min to just use database value when bag slots are increased
+		// Kraqur: Override RoF2 bag slot limit. Clamp DB bagslots to 0–254 so the server
+		// can support expanded container sizes without loading invalid slot counts.
+
+		item.BagSlots = static_cast<uint8>(EQ::Clamp(Strings::ToInt(row[ItemField::bagslots]), 0, 254)); // Set Bag Slots
 		item.BagType = static_cast<uint8>(Strings::ToUnsignedInt(row[ItemField::bagtype]));
 		item.BagWR = static_cast<uint8>(EQ::Clamp(Strings::ToInt(row[ItemField::bagwr]), 0, 100));
 

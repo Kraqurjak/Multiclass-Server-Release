@@ -143,41 +143,53 @@ namespace EQ
 
 	} // namespace invslot
 
-	namespace invbag {
-		using Titanium::invbag::SLOT_INVALID;
-		using Titanium::invbag::SLOT_BEGIN;
-		using Titanium::invbag::SLOT_END;
-		using Titanium::invbag::SLOT_COUNT;
+	// Kraqur: Server-defined bag slot ranges for RoF2. The client only defines the
+	// geometry (SLOT_INVALID, SLOT_BEGIN, SLOT_COUNT, SLOT_END), but the server
+	// must allocate unique global slot ID ranges for each container type.
+	// These ranges depend on SLOT_COUNT, so increasing the RoF2 bag slot limit
+	// (e.g., to 255) requires recalculating all BEGIN/END offsets below.
+	// Ranges are placed starting at 1000 to avoid collisions with client inventory
+	// slot IDs and to maintain compatibility with EQEmu's internal slot mapping.
 
-		using Titanium::invbag::GENERAL_BAGS_BEGIN;
+	namespace invbag {
+		inline EQ::versions::ClientVersion GetInvBagRef() { return EQ::versions::ClientVersion::RoF2; }
+
+		// Client-defined bag geometry
+		using RoF2::invbag::SLOT_INVALID;
+		using RoF2::invbag::SLOT_BEGIN;
+		using RoF2::invbag::SLOT_COUNT;
+		using RoF2::invbag::SLOT_END;
+
+		// ---- SERVER-DEFINED BAG SLOT RANGES ----
+
+		const int16 GENERAL_BAGS_BEGIN = 1000;
 		const int16 GENERAL_BAGS_COUNT = invslot::GENERAL_COUNT * SLOT_COUNT;
-		const int16 GENERAL_BAGS_END = (GENERAL_BAGS_BEGIN + GENERAL_BAGS_COUNT) - 1;
+		const int16 GENERAL_BAGS_END = GENERAL_BAGS_BEGIN + GENERAL_BAGS_COUNT - 1;
 
 		const int16 GENERAL_BAGS_8_COUNT = 8 * SLOT_COUNT;
-		const int16 GENERAL_BAGS_8_END = (GENERAL_BAGS_BEGIN + GENERAL_BAGS_8_COUNT) - 1;
+		const int16 GENERAL_BAGS_8_END = GENERAL_BAGS_BEGIN + GENERAL_BAGS_8_COUNT - 1;
 
-		const int16 CURSOR_BAG_BEGIN = 351;
+		const int16 CURSOR_BAG_BEGIN = GENERAL_BAGS_END + 1;
 		const int16 CURSOR_BAG_COUNT = SLOT_COUNT;
-		const int16 CURSOR_BAG_END = (CURSOR_BAG_BEGIN + CURSOR_BAG_COUNT) - 1;
+		const int16 CURSOR_BAG_END = CURSOR_BAG_BEGIN + CURSOR_BAG_COUNT - 1;
 
-		using Titanium::invbag::BANK_BAGS_BEGIN;
-		const int16 BANK_BAGS_COUNT = (invtype::BANK_SIZE * SLOT_COUNT);
-		const int16 BANK_BAGS_END = (BANK_BAGS_BEGIN + BANK_BAGS_COUNT) - 1;
+		const int16 BANK_BAGS_BEGIN = CURSOR_BAG_END + 1;
+		const int16 BANK_BAGS_COUNT = invtype::BANK_SIZE * SLOT_COUNT;
+		const int16 BANK_BAGS_END = BANK_BAGS_BEGIN + BANK_BAGS_COUNT - 1;
 
 		const int16 BANK_BAGS_16_COUNT = 16 * SLOT_COUNT;
-		const int16 BANK_BAGS_16_END = (BANK_BAGS_BEGIN + BANK_BAGS_16_COUNT) - 1;
+		const int16 BANK_BAGS_16_END = BANK_BAGS_BEGIN + BANK_BAGS_16_COUNT - 1;
 
-		using Titanium::invbag::SHARED_BANK_BAGS_BEGIN;
+		const int16 SHARED_BANK_BAGS_BEGIN = BANK_BAGS_END + 1;
 		const int16 SHARED_BANK_BAGS_COUNT = invtype::SHARED_BANK_SIZE * SLOT_COUNT;
-		const int16 SHARED_BANK_BAGS_END = (SHARED_BANK_BAGS_BEGIN + SHARED_BANK_BAGS_COUNT) - 1;
+		const int16 SHARED_BANK_BAGS_END = SHARED_BANK_BAGS_BEGIN + SHARED_BANK_BAGS_COUNT - 1;
 
-		using Titanium::invbag::TRADE_BAGS_BEGIN;
+		const int16 TRADE_BAGS_BEGIN = SHARED_BANK_BAGS_END + 1;
 		const int16 TRADE_BAGS_COUNT = invtype::TRADE_SIZE * SLOT_COUNT;
-		const int16 TRADE_BAGS_END = (TRADE_BAGS_BEGIN + TRADE_BAGS_COUNT) - 1;
+		const int16 TRADE_BAGS_END = TRADE_BAGS_BEGIN + TRADE_BAGS_COUNT - 1;
 
-		using Titanium::invbag::GetInvBagIndexName;
-
-	} // namespace invbag
+		using RoF2::invbag::GetInvBagIndexName;
+	}  // namespace invbag
 
 	namespace invaug {
 		using RoF2::invaug::SOCKET_INVALID;
