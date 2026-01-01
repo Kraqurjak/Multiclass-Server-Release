@@ -20,7 +20,6 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
-
 // for windows compile
 #ifndef _WINDOWS
 	#include <stdarg.h>
@@ -12308,27 +12307,7 @@ int Client::GetEXPPercentage()
 	return static_cast<int>(std::round(scaled * 100.0 / 330.0)); // unscaled pct
 }
 
-int Client::GetAAEXPPercentage()
-{
-	int scaled = static_cast<int>(330.0f * static_cast<float>(GetAAXP()) / GetRequiredAAExperience());
 
-	return static_cast<int>(std::round(scaled * 100.0 / 330.0));
-}
-
-int Client::GetEXPPercentage()
-{
-	float    norm = 0.0f;
-	uint32_t min  = GetEXPForLevel(GetLevel());
-	uint32_t max  = GetEXPForLevel(GetLevel() + 1);
-
-	if (min != max) {
-		norm = static_cast<float>(GetEXP() - min) / (max - min);
-	}
-
-	int scaled = static_cast<int>(330.0f * norm); // scale and truncate
-
-	return static_cast<int>(std::round(scaled * 100.0 / 330.0)); // unscaled pct
-}
 
 uint32 Client::GetClassesBits() const
 {
@@ -12342,7 +12321,7 @@ uint32 Client::GetClassesBits() const
 bool Client::AddExtraClass(int class_id) {
     if (RuleB(Custom, MulticlassingEnabled) && class_id >= Class::Warrior && class_id <= Class::Berserker) {
         int classes_bits = GetClassesBits();
-        int class_count = __builtin_popcount(classes_bits);
+		int class_count = __popcnt(classes_bits);
         int n_class_bit = GetPlayerClassBit(class_id);
 
         if (class_count > 2 || (classes_bits & n_class_bit)) {
@@ -12367,3 +12346,140 @@ bool Client::AddExtraClass(int class_id) {
         return false;
     }
 }
+
+bool Client::RemoveExtraClass(int class_id) {
+    if (RuleB(Custom, MulticlassingEnabled) && class_id >= Class::Warrior && class_id <= Class::Berserker) {
+        int classes_bits = GetClassesBits();
+        int n_class_bit  = GetPlayerClassBit(class_id);
+
+        // If they don't have this class, nothing to remove
+        if (!(classes_bits & n_class_bit)) {
+            return false;
+        }
+
+        // Clear the bit
+        int new_bits = classes_bits & ~n_class_bit;
+
+        // Update DB
+        std::string query = StringFormat(
+            "REPLACE INTO character_multiclass_data (id, classes) VALUES (%i, %i)",
+            character_id, new_bits
+        );
+        auto results = database.QueryDatabase(query);
+        if (!results.Success()) {
+            return false;
+        }
+
+        // Update player profile
+        m_pp.classes = new_bits;
+
+        // Clear AA state and refund points
+        SendClearAA();   // <-- tell client to wipe AA window
+        RefundAA();      // <-- give back spent points
+
+        // Wipe AA arrays in profile
+        memset(&m_pp.aa_array[0], 0, sizeof(AA_Array) * MAX_PP_AA_ARRAY);
+        for (int slot = 0; slot < _maxLeaderAA; ++slot) {
+            m_pp.leader_abilities.ranks[slot] = 0;
+        }
+        m_pp.group_leadership_points = 0;
+        m_pp.raid_leadership_points  = 0;
+        m_pp.group_leadership_exp    = 0;
+        m_pp.raid_leadership_exp     = 0;
+
+        // Delete AA rows from DB
+        database.DeleteCharacterAAs(CharacterID());
+        database.DeleteCharacterLeadershipAbilities(CharacterID());
+
+        // Recalculate stats/bonuses and push AA payloads so the UI redraws immediately
+        CalcBonuses();
+        SendEdgeStatBulkUpdate();
+        SendAlternateAdvancementStats();
+        SendAlternateAdvancementPoints();
+        SendAlternateAdvancementTable();
+
+        return true;
+    }
+    return false;
+}
+
+
+bool Client::RemoveAllExtraClasses()
+{
+	if (!RuleB(Custom, MulticlassingEnabled)) {
+		return false;
+	}
+
+	// Clear all extra classes (leave only the base class)
+	int base_class_bit = GetPlayerClassBit(GetClass()); // their original class
+	int new_bits = base_class_bit;
+
+	// Update DB
+	std::string query = StringFormat(
+		"REPLACE INTO character_multiclass_data (id, classes) VALUES (%i, %i)",
+		character_id, new_bits
+	);
+	auto results = database.QueryDatabase(query);
+	if (!results.Success()) {
+		return false;
+	}
+
+	// Update player profile
+	m_pp.classes = new_bits;
+
+	// Wipe AA arrays in profile
+	memset(&m_pp.aa_array[0], 0, sizeof(AA_Array) * MAX_PP_AA_ARRAY);
+	for (int slot = 0; slot < _maxLeaderAA; ++slot) {
+		m_pp.leader_abilities.ranks[slot] = 0;
+	}
+	m_pp.group_leadership_points = 0;
+	m_pp.raid_leadership_points = 0;
+	m_pp.group_leadership_exp = 0;
+	m_pp.raid_leadership_exp = 0;
+
+	// Delete AA rows from DB
+	database.DeleteCharacterAAs(CharacterID());
+	database.DeleteCharacterLeadershipAbilities(CharacterID());
+
+	// Force client to flush AA window
+	SendClearAA();
+
+	// Recalculate stats/bonuses and push AA payloads so the UI redraws immediately
+	CalcBonuses();
+	SendEdgeStatBulkUpdate();
+	SendAlternateAdvancementStats();
+	SendAlternateAdvancementPoints();
+	SendAlternateAdvancementTable();
+
+	return true;
+}
+
+
+
+bool Client::IsSeasonal() {
+	std::string bucket_str = this->GetBucket("SeasonalCharacter");
+	int bucket = bucket_str.empty() ? 0 : std::stoi(bucket_str);
+
+	bool rule_enabled = RuleB(Custom, EnableSeasonalCharacters);
+
+	return (bucket == 1 && rule_enabled);
+}
+
+
+void Client::SaveBucket(const std::string& bucket_name, const std::string& bucket_value) {
+	if (CharacterID() == 0) {
+		return;
+	}
+
+	std::string query = StringFormat(
+		"REPLACE INTO character_buckets (char_id, bucket_name, bucket_value) "
+		"VALUES (%u, '%s', '%s')",
+		CharacterID(),
+		bucket_name.c_str(),
+		bucket_value.c_str()
+	);
+
+	auto results = database.QueryDatabase(query);
+}
+
+

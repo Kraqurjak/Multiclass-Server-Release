@@ -401,7 +401,7 @@ public:
 	void Duck();
 	void Stand();
 	void Sit();
-
+	
 	virtual void SetMaxHP();
 	int32 LevelRegen();
 	void SetGM(bool toggle);
@@ -444,6 +444,10 @@ public:
 
 	uint32 GetClassesBits() const;
 	bool   AddExtraClass(int class_id);
+	bool RemoveExtraClass(int class_id);
+	bool RemoveAllExtraClasses();
+	bool IsSeasonal();
+
 
 	// guild pool regen shit. Sends a SpawnAppearance with a value that regens to value * 0.001
 	void EnableAreaHPRegen(int value);
@@ -863,6 +867,7 @@ public:
 	uint16 GetClassTrackingDistanceMultiplier(uint16 class_);
 
 	bool CanThisClassTrack();
+	void SaveBucket(const std::string& bucket_name, const std::string& bucket_value);
 
 	// defer save used when bulk saving
 	void UnscribeSpell(int slot, bool update_client = true, bool defer_save = false);
