@@ -763,6 +763,14 @@ void Client::CompleteConnect()
 		pet->SendPetBuffsToClient();
 	}
 
+	// Kraqur: Multiclass Pet - spawn all secondary pets and lock UI to primary pet
+	SpawnSecondaryPets();
+
+	// Lock UI to the pet you want
+	if (pet) {
+		SetPetUIID(pet->GetID());
+	}
+
 	if (GetGroup())
 		database.RefreshGroupFromDB(this);
 
@@ -968,6 +976,8 @@ void Client::CompleteConnect()
 		GoToBind();
 		return;
 	}
+	// Kraqur: Multiclass Pet - trigger deferred pet buff restoration after zoning
+	m_pending_pet_buff_sync = true;
 }
 
 // connecting opcode handlers
@@ -1667,28 +1677,37 @@ void Client::Handle_Connect_OP_ZoneEntry(const EQApplicationPacket *app)
 	}
 
 	if (RuleB(NPC, PetZoneWithOwner)) {
-		/* Load Pet */
+
+		// Load primary pet (engine-owned)
 		database.LoadPetInfo(this);
+
 		if (m_petinfo.SpellID > 1 && !GetPet() && m_petinfo.SpellID <= SPDAT_RECORDS) {
-			MakePoweredPet(m_petinfo.SpellID, spells[m_petinfo.SpellID].teleport_zone, m_petinfo.petpower,
-						   m_petinfo.Name, m_petinfo.size);
+			MakePoweredPet(
+				m_petinfo.SpellID,
+				spells[m_petinfo.SpellID].teleport_zone,
+				m_petinfo.petpower,
+				m_petinfo.Name,
+				m_petinfo.size
+			);
+
 			if (GetPet() && GetPet()->IsNPC()) {
-				NPC *pet = GetPet()->CastToNPC();
+				NPC* pet = GetPet()->CastToNPC();
 				pet->SetPetState(m_petinfo.Buffs, m_petinfo.Items);
 				pet->CalcBonuses();
 				pet->SetHP(m_petinfo.HP);
 				pet->SetMana(m_petinfo.Mana);
 
-				// Taunt persists when zoning on newer clients, overwrite default.
 				if (m_ClientVersionBit & EQ::versions::maskUFAndLater) {
 					if (!firstlogon) {
 						pet->SetTaunting(m_petinfo.taunting);
 					}
 				}
 			}
+
 			m_petinfo.SpellID = 0;
 		}
 	}
+
 	/* Moved here so it's after where we load the pet data. */
 	if (!aabonuses.ZoneSuspendMinion && !spellbonuses.ZoneSuspendMinion && !itembonuses.ZoneSuspendMinion) {
 		memset(&m_suspendedminion, 0, sizeof(PetInfo));
@@ -10928,8 +10947,8 @@ void Client::Handle_OP_PDeletePetition(const EQApplicationPacket *app)
 		MessageString(Chat::White, PETITION_NO_DELETE);
 	return;
 }
-
-void Client::Handle_OP_PetCommands(const EQApplicationPacket *app)
+// Kraqur: Multiclass Pet - override single-pet command handling with multiclass fan-out to all owned pets
+void Client::Handle_OP_PetCommands(const EQApplicationPacket* app)
 {
 	if (app->size != sizeof(PetCommand_Struct)) {
 		LogError("Wrong size: OP_PetCommands, size=[{}], expected [{}]", app->size, sizeof(PetCommand_Struct));
@@ -10938,7 +10957,7 @@ void Client::Handle_OP_PetCommands(const EQApplicationPacket *app)
 	char val1[20] = { 0 };
 	PetCommand_Struct* pet = (PetCommand_Struct*)app->pBuffer;
 	Mob* mypet = GetPet();
-	Mob *target = entity_list.GetMob(pet->target);
+	Mob* target = entity_list.GetMob(pet->target);
 
 	if (!mypet || pet->command == PET_LEADER) {
 		if (pet->command == PET_LEADER) {
@@ -10949,7 +10968,8 @@ void Client::Handle_OP_PetCommands(const EQApplicationPacket *app)
 					target->SayString(PET_LEADERIS, owner->GetCleanName());
 				else
 					target->SayString(I_FOLLOW_NOONE);
-			} else if (mypet) {
+			}
+			else if (mypet) {
 				mypet->SayString(PET_LEADERIS, GetName());
 			}
 		}
@@ -10979,189 +10999,294 @@ void Client::Handle_OP_PetCommands(const EQApplicationPacket *app)
 	switch (PetCommand)
 	{
 	case PET_ATTACK: {
+
 		if (!target)
 			break;
-		if (target->IsMezzed()) {
-			MessageString(Chat::NPCQuestSay, CANNOT_WAKE, mypet->GetCleanName(), target->GetCleanName());
-			break;
-		}
-		if (mypet->IsFeared())
-			break; //prevent pet from attacking stuff while feared
 
-		if (!mypet->IsAttackAllowed(target)) {
-			mypet->SayString(this, NOT_LEGAL_TARGET);
-			break;
-		}
+		// Kraqur: Multiclass Pet - fan-out attack command to all owned pets
+		std::vector<Mob*> pets;
+		GetAllPets(pets);
 
-		// default range is 200, takes Z into account
-		// really they do something weird where they're added to the aggro list then remove them
-		// and will attack if they come in range -- too lazy, lets remove exploits for now
-		if (DistanceSquared(mypet->GetPosition(), target->GetPosition()) >= RuleR(Aggro, PetAttackRange)) {
-			// they say they're attacking then remove on live ... so they don't really say anything in this case ...
-			break;
-		}
+		for (Mob* pet : pets) {
 
-		if ((mypet->GetPetType() == petAnimation && aabonuses.PetCommands[PetCommand]) || mypet->GetPetType() != petAnimation) {
-			if (target != this && DistanceSquared(mypet->GetPosition(), target->GetPosition()) <= (RuleR(Pets, AttackCommandRange)*RuleR(Pets, AttackCommandRange))) {
-				mypet->SetFeigned(false);
-				if (mypet->IsPetStop()) {
-					mypet->SetPetStop(false);
+			if (!pet)
+				continue;
+
+			if (pet->IsFeared())
+				continue;
+
+			if (!pet->IsAttackAllowed(target))
+				continue;
+
+			if (DistanceSquared(pet->GetPosition(), target->GetPosition()) >= RuleR(Aggro, PetAttackRange))
+				continue;
+
+			if ((pet->GetPetType() == petAnimation && aabonuses.PetCommands[PET_ATTACK]) ||
+				pet->GetPetType() != petAnimation) {
+
+				pet->SetFeigned(false);
+
+				if (pet->IsPetStop()) {
+					pet->SetPetStop(false);
 					SetPetCommandState(PET_BUTTON_STOP, 0);
 				}
-				if (mypet->IsPetRegroup()) {
-					mypet->SetPetRegroup(false);
+
+				if (pet->IsPetRegroup()) {
+					pet->SetPetRegroup(false);
 					SetPetCommandState(PET_BUTTON_REGROUP, 0);
 				}
 
-				// fix GUI sit button to be unpressed and stop sitting regen
 				SetPetCommandState(PET_BUTTON_SIT, 0);
-				mypet->SetAppearance(eaStanding);
+				pet->SetAppearance(eaStanding);
 
 				zone->AddAggroMob();
-				// classic acts like qattack
+
 				int hate = 1;
-				if (mypet->IsEngaged()) {
-					auto top = mypet->GetHateMost();
+				if (pet->IsEngaged()) {
+					auto top = pet->GetHateMost();
 					if (top && top != target)
-						hate += mypet->GetHateAmount(top) - mypet->GetHateAmount(target) + 100; // should be enough to cause target change
+						hate += pet->GetHateAmount(top) - pet->GetHateAmount(target) + 100;
 				}
-				mypet->AddToHateList(target, hate, 0, true, false, false, SPELL_UNKNOWN, true);
-				MessageString(Chat::PetResponse, PET_ATTACKING, mypet->GetCleanName(), target->GetCleanName());
-				SetTarget(target);
+
+				pet->AddToHateList(target, hate, 0, true, false, false, SPELL_UNKNOWN, true);
+				MessageString(Chat::PetResponse, PET_ATTACKING, pet->GetCleanName(), target->GetCleanName());
 			}
 		}
-		break;
+
+		// IMPORTANT: stop here so the original single-pet logic does not run
+		return;
 	}
+
 	case PET_QATTACK: {
-		if (mypet->IsFeared())
-			break; //prevent pet from attacking stuff while feared
 
 		if (!GetTarget())
 			break;
+
 		if (GetTarget()->IsMezzed()) {
-			MessageString(Chat::NPCQuestSay, CANNOT_WAKE, mypet->GetCleanName(), GetTarget()->GetCleanName());
+			MessageString(Chat::NPCQuestSay, CANNOT_WAKE, GetName(), GetTarget()->GetCleanName());
 			break;
 		}
+		// Kraqur: Multiclass Pet - fan-out quick attack to all owned pets
+		std::vector<Mob*> pets;
+		GetAllPets(pets);
 
-		if (!mypet->IsAttackAllowed(GetTarget())) {
-			mypet->SayString(this, NOT_LEGAL_TARGET);
-			break;
-		}
+		for (Mob* pet : pets) {
 
-		if ((mypet->GetPetType() == petAnimation && aabonuses.PetCommands[PetCommand]) || mypet->GetPetType() != petAnimation) {
-			if (GetTarget() != this && DistanceSquaredNoZ(mypet->GetPosition(), GetTarget()->GetPosition()) <= (RuleR(Pets, AttackCommandRange)*RuleR(Pets, AttackCommandRange))) {
-				mypet->SetFeigned(false);
-				if (mypet->IsPetStop()) {
-					mypet->SetPetStop(false);
-					SetPetCommandState(PET_BUTTON_STOP, 0);
+			if (!pet)
+				continue;
+
+			if (pet->IsFeared())
+				continue;
+
+			if (!pet->IsAttackAllowed(GetTarget())) {
+				pet->SayString(this, NOT_LEGAL_TARGET);
+				continue;PET_BACKOFF
+			}
+
+			if ((pet->GetPetType() == petAnimation && aabonuses.PetCommands[PET_QATTACK]) ||
+				pet->GetPetType() != petAnimation) {
+
+				if (GetTarget() != this &&
+					DistanceSquaredNoZ(pet->GetPosition(), GetTarget()->GetPosition()) <=
+					(RuleR(Pets, AttackCommandRange) * RuleR(Pets, AttackCommandRange))) {
+
+					pet->SetFeigned(false);
+
+					if (pet->IsPetStop()) {
+						pet->SetPetStop(false);
+						SetPetCommandState(PET_BUTTON_STOP, 0);
+					}
+
+					if (pet->IsPetRegroup()) {
+						pet->SetPetRegroup(false);
+						SetPetCommandState(PET_BUTTON_REGROUP, 0);
+					}
+
+					// fix GUI sit button to be unpressed and stop sitting regen
+					SetPetCommandState(PET_BUTTON_SIT, 0);
+					pet->SetAppearance(eaStanding);
+
+					zone->AddAggroMob();
+					pet->AddToHateList(GetTarget(), 1, 0, true, false, false, SPELL_UNKNOWN, true);
+					MessageString(Chat::PetResponse, PET_ATTACKING, pet->GetCleanName(), GetTarget()->GetCleanName());
 				}
-				if (mypet->IsPetRegroup()) {
-					mypet->SetPetRegroup(false);
-					SetPetCommandState(PET_BUTTON_REGROUP, 0);
-				}
-
-				// fix GUI sit button to be unpressed and stop sitting regen
-				SetPetCommandState(PET_BUTTON_SIT, 0);
-				mypet->SetAppearance(eaStanding);
-
-				zone->AddAggroMob();
-				mypet->AddToHateList(GetTarget(), 1, 0, true, false, false, SPELL_UNKNOWN, true);
-				MessageString(Chat::PetResponse, PET_ATTACKING, mypet->GetCleanName(), GetTarget()->GetCleanName());
 			}
 		}
-		break;
+
+		// Stop original single-pet logic
+		return;
 	}
+
 	case PET_BACKOFF: {
-		if (mypet->IsFeared()) break; //keeps pet running while feared
+		// Kraqur: Multiclass Pet - fan-out backoff to all owned pets
+		std::vector<Mob*> pets;
+		GetAllPets(pets);
 
-		if ((mypet->GetPetType() == petAnimation && aabonuses.PetCommands[PetCommand]) || mypet->GetPetType() != petAnimation) {
-			mypet->SayString(this, Chat::PetResponse, PET_CALMING);
-			mypet->WipeHateList();
-			mypet->SetTarget(nullptr);
-			if (mypet->IsPetStop()) {
-				mypet->SetPetStop(false);
-				SetPetCommandState(PET_BUTTON_STOP, 0);
-			}
-		}
-		break;
-	}
-	case PET_HEALTHREPORT: {
-		if ((mypet->GetPetType() == petAnimation && aabonuses.PetCommands[PetCommand]) || mypet->GetPetType() != petAnimation) {
-			MessageString(Chat::PetResponse, PET_REPORT_HP, ConvertArrayF(mypet->GetHPRatio(), val1));
-			mypet->ShowBuffs(this);
-		}
-		break;
-	}
-	case PET_GETLOST: {
-		if (mypet->Charmed())
-			break;
-		if (mypet->GetPetType() == petCharmed || !mypet->IsNPC()) {
-			// eqlive ignores this command
-			// we could just remove the charm
-			// and continue
-			mypet->BuffFadeByEffect(SE_Charm);
-			break;
-		}
-		else {
-			SetPet(nullptr);
-		}
+		for (Mob* pet : pets) {
 
-		mypet->SayString(this, Chat::PetResponse, PET_GETLOST_STRING);
-		mypet->CastToNPC()->Depop();
+			if (!pet)
+				continue;
 
-		//Oddly, the client (Titanium) will still allow "/pet get lost" command despite me adding the code below. If someone can figure that out, you can uncomment this code and use it.
-		/*
-		if((mypet->GetPetType() == petAnimation && GetAA(aaAnimationEmpathy) >= 2) || mypet->GetPetType() != petAnimation) {
-		mypet->SayString(PET_GETLOST_STRING);
-		mypet->CastToNPC()->Depop();
-		}
-		*/
+			if (pet->IsFeared())
+				continue; // keeps pet running while feared
 
-		break;
-	}
-	case PET_GUARDHERE: {
-		if (mypet->IsFeared()) break; //could be exploited like PET_BACKOFF
+			if ((pet->GetPetType() == petAnimation && aabonuses.PetCommands[PET_BACKOFF]) ||
+				pet->GetPetType() != petAnimation) {
 
-		if ((mypet->GetPetType() == petAnimation && aabonuses.PetCommands[PetCommand]) || mypet->GetPetType() != petAnimation) {
-			if (mypet->IsNPC()) {
+				pet->SayString(this, Chat::PetResponse, PET_CALMING);
+				pet->WipeHateList();
+				pet->SetTarget(nullptr);
 
-				// Set Sit button to unpressed - send stand anim/end hpregen
-				mypet->SetFeigned(false);
-				SetPetCommandState(PET_BUTTON_SIT, 0);
-				mypet->SendAppearancePacket(AppearanceType::Animation, Animation::Standing);
-
-				mypet->SayString(this, Chat::PetResponse, PET_GUARDINGLIFE);
-				mypet->SetPetOrder(SPO_Guard);
-				mypet->CastToNPC()->SaveGuardSpot(mypet->GetPosition());
-				if (!mypet->GetTarget()) // want them to not twitch if they're chasing something down
-					mypet->StopNavigation();
-				if (mypet->IsPetStop()) {
-					mypet->SetPetStop(false);
+				if (pet->IsPetStop()) {
+					pet->SetPetStop(false);
 					SetPetCommandState(PET_BUTTON_STOP, 0);
 				}
 			}
 		}
-		break;
+
+		return;
 	}
-	case PET_FOLLOWME: {
-		if (mypet->IsFeared()) break; //could be exploited like PET_BACKOFF
 
-		if ((mypet->GetPetType() == petAnimation && aabonuses.PetCommands[PetCommand]) || mypet->GetPetType() != petAnimation) {
-			mypet->SetFeigned(false);
-			mypet->SayString(this, Chat::PetResponse, PET_FOLLOWING);
-			mypet->SetPetOrder(SPO_Follow);
 
-			// fix GUI sit button to be unpressed - send stand anim/end hpregen
-			SetPetCommandState(PET_BUTTON_SIT, 0);
-			mypet->SendAppearancePacket(AppearanceType::Animation, Animation::Standing);
+	case PET_HEALTHREPORT: {
+		// Kraqur: Multiclass Pet - fan-out health report to all owned pets
+		std::vector<Mob*> pets;
+		GetAllPets(pets);
 
-			if (mypet->IsPetStop()) {
-				mypet->SetPetStop(false);
-				SetPetCommandState(PET_BUTTON_STOP, 0);
+		for (Mob* pet : pets) {
+
+			if (!pet)
+				continue;
+
+			if ((pet->GetPetType() == petAnimation && aabonuses.PetCommands[PET_HEALTHREPORT]) ||
+				pet->GetPetType() != petAnimation) {
+
+				MessageString(
+					Chat::PetResponse,
+					PET_REPORT_HP,
+					ConvertArrayF(pet->GetHPRatio(), val1)
+				);
+
+				pet->ShowBuffs(this);
 			}
 		}
-		break;
+
+		return;
 	}
+
+
+
+	case PET_GETLOST: {
+		// Kraqur: Multiclass Pet - clear class-pet slot and depop all owned pets
+		std::vector<Mob*> pets;
+		GetAllPets(pets);
+
+		for (Mob* pet : pets) {
+
+			if (!pet)
+				continue;
+
+			if (pet->Charmed())
+				continue;
+
+			if (pet->GetPetType() == petCharmed || !pet->IsNPC()) {
+				pet->BuffFadeByEffect(SE_Charm);
+				continue;
+			}
+
+			uint16 pet_id = pet->GetID();
+
+			// Clear class-pet slot for this pet
+			ClearClassPetByPetID(pet_id);
+
+			// If this was the primary pet, clear it
+			if (GetPetID() == pet_id) {
+				SetPet(nullptr);
+			}
+
+			pet->SayString(this, Chat::PetResponse, PET_GETLOST_STRING);
+			pet->CastToNPC()->Depop();
+		}
+
+		return;
+	}
+
+
+	case PET_GUARDHERE: {
+		// Kraqur: Multiclass Pet - fan-out guard command to all owned pets
+		std::vector<Mob*> pets;
+		GetAllPets(pets);
+
+		for (Mob* pet : pets) {
+
+			if (!pet)
+				continue;
+
+			if (pet->IsFeared())
+				continue; // could be exploited like PET_BACKOFF
+
+			if ((pet->GetPetType() == petAnimation && aabonuses.PetCommands[PET_GUARDHERE]) ||
+				pet->GetPetType() != petAnimation) {
+
+				if (pet->IsNPC()) {
+
+					// Set Sit button to unpressed - send stand anim/end hpregen
+					pet->SetFeigned(false);
+					SetPetCommandState(PET_BUTTON_SIT, 0);
+					pet->SendAppearancePacket(AppearanceType::Animation, Animation::Standing);
+
+					pet->SayString(this, Chat::PetResponse, PET_GUARDINGLIFE);
+					pet->SetPetOrder(SPO_Guard);
+					pet->CastToNPC()->SaveGuardSpot(pet->GetPosition());
+
+					if (!pet->GetTarget())
+						pet->StopNavigation();
+
+					if (pet->IsPetStop()) {
+						pet->SetPetStop(false);
+						SetPetCommandState(PET_BUTTON_STOP, 0);
+					}
+				}
+			}
+		}
+
+		return;
+	}
+
+	case PET_FOLLOWME: {
+		// Kraqur: Multiclass Pet - fan-out follow command to all owned pets
+		std::vector<Mob*> pets;
+		GetAllPets(pets);
+
+		for (Mob* pet : pets) {
+
+			if (!pet)
+				continue;
+
+			if (pet->IsFeared())
+				continue; // could be exploited like PET_BACKOFF
+
+			if ((pet->GetPetType() == petAnimation && aabonuses.PetCommands[PET_FOLLOWME]) ||
+				pet->GetPetType() != petAnimation) {
+
+				pet->SetFeigned(false);
+				pet->SayString(this, Chat::PetResponse, PET_FOLLOWING);
+				pet->SetPetOrder(SPO_Follow);
+
+				// fix GUI sit button to be unpressed - send stand anim/end hpregen
+				SetPetCommandState(PET_BUTTON_SIT, 0);
+				pet->SendAppearancePacket(AppearanceType::Animation, Animation::Standing);
+
+				if (pet->IsPetStop()) {
+					pet->SetPetStop(false);
+					SetPetCommandState(PET_BUTTON_STOP, 0);
+				}
+			}
+		}
+
+		return;
+	}
+
 	case PET_TAUNT: {
 		if ((mypet->GetPetType() == petAnimation && aabonuses.PetCommands[PetCommand]) || mypet->GetPetType() != petAnimation) {
 			if (mypet->CastToNPC()->IsTaunting())
@@ -11191,76 +11316,141 @@ void Client::Handle_OP_PetCommands(const EQApplicationPacket *app)
 		}
 		break;
 	}
+
 	case PET_GUARDME: {
-		if (mypet->IsFeared()) break; //could be exploited like PET_BACKOFF
+		// Kraqur: Multiclass Pet - fan-out guard-me command to all owned pets
+		std::vector<Mob*> pets;
+		GetAllPets(pets);
 
-		if ((mypet->GetPetType() == petAnimation && aabonuses.PetCommands[PetCommand]) || mypet->GetPetType() != petAnimation) {
-			mypet->SetFeigned(false);
-			mypet->SayString(this, Chat::PetResponse, PET_GUARDME_STRING);
-			mypet->SetPetOrder(SPO_Follow);
+		for (Mob* pet : pets) {
 
-			// Set Sit button to unpressed - send stand anim/end hpregen
-			SetPetCommandState(PET_BUTTON_SIT, 0);
-			mypet->SendAppearancePacket(AppearanceType::Animation, Animation::Standing);
+			if (!pet)
+				continue;
 
-			if (mypet->IsPetStop()) {
-				mypet->SetPetStop(false);
-				SetPetCommandState(PET_BUTTON_STOP, 0);
+			if (pet->IsFeared())
+				continue; // could be exploited like PET_BACKOFF
+
+			if ((pet->GetPetType() == petAnimation && aabonuses.PetCommands[PET_GUARDME]) ||
+				pet->GetPetType() != petAnimation) {
+
+				pet->SetFeigned(false);
+				pet->SayString(this, Chat::PetResponse, PET_GUARDME_STRING);
+				pet->SetPetOrder(SPO_Follow);
+
+				// Set Sit button to unpressed - send stand anim/end hpregen
+				SetPetCommandState(PET_BUTTON_SIT, 0);
+				pet->SendAppearancePacket(AppearanceType::Animation, Animation::Standing);
+
+				if (pet->IsPetStop()) {
+					pet->SetPetStop(false);
+					SetPetCommandState(PET_BUTTON_STOP, 0);
+				}
 			}
 		}
-		break;
+
+		return;
 	}
+
 	case PET_SIT: {
-		if (mypet->IsFeared()) break; //could be exploited like PET_BACKOFF
+		// Kraqur: Multiclass Pet - fan-out sit/stand commands to all owned pets
+		std::vector<Mob*> pets;
+		GetAllPets(pets);
 
-		if ((mypet->GetPetType() == petAnimation && aabonuses.PetCommands[PetCommand]) || mypet->GetPetType() != petAnimation) {
-			if (mypet->GetPetOrder() == SPO_Sit)
-			{
-				mypet->SetFeigned(false);
-				mypet->SayString(this, Chat::PetResponse, PET_SIT_STRING);
-				mypet->SetPetOrder(SPO_Follow);
-				mypet->SendAppearancePacket(AppearanceType::Animation, Animation::Standing);
-			}
-			else
-			{
-				mypet->SetFeigned(false);
-				mypet->SayString(this, Chat::PetResponse, PET_SIT_STRING);
-				mypet->SetPetOrder(SPO_Sit);
-				mypet->SetRunAnimSpeed(0);
-				if (!mypet->UseBardSpellLogic())	//maybe we can have a bard pet
-					mypet->InterruptSpell(); //No cast 4 u. //i guess the pet should start casting
-				mypet->SendAppearancePacket(AppearanceType::Animation, Animation::Sitting);
+		for (Mob* pet : pets) {
+
+			if (!pet)
+				continue;
+
+			if (pet->IsFeared())
+				continue; // could be exploited like PET_BACKOFF
+
+			if ((pet->GetPetType() == petAnimation && aabonuses.PetCommands[PET_SIT]) ||
+				pet->GetPetType() != petAnimation) {
+
+				if (pet->GetPetOrder() == SPO_Sit) {
+
+					pet->SetFeigned(false);
+					pet->SayString(this, Chat::PetResponse, PET_SIT_STRING);
+					pet->SetPetOrder(SPO_Follow);
+					pet->SendAppearancePacket(AppearanceType::Animation, Animation::Standing);
+				}
+				else {
+
+					pet->SetFeigned(false);
+					pet->SayString(this, Chat::PetResponse, PET_SIT_STRING);
+					pet->SetPetOrder(SPO_Sit);
+					pet->SetRunAnimSpeed(0);
+
+					if (!pet->UseBardSpellLogic())
+						pet->InterruptSpell();
+
+					pet->SendAppearancePacket(AppearanceType::Animation, Animation::Sitting);
+				}
 			}
 		}
-		break;
+
+		return;
 	}
+
 	case PET_STANDUP: {
-		if (mypet->IsFeared()) break; //could be exploited like PET_BACKOFF
+		// Kraqur: Multiclass Pet - fan-out sit/stand commands to all owned pets
+		std::vector<Mob*> pets;
+		GetAllPets(pets);
 
-		if ((mypet->GetPetType() == petAnimation && aabonuses.PetCommands[PetCommand]) || mypet->GetPetType() != petAnimation) {
-			mypet->SetFeigned(false);
-			mypet->SayString(this, Chat::PetResponse, PET_SIT_STRING);
-			SetPetCommandState(PET_BUTTON_SIT, 0);
-			mypet->SetPetOrder(SPO_Follow);
-			mypet->SendAppearancePacket(AppearanceType::Animation, Animation::Standing);
+		for (Mob* pet : pets) {
+
+			if (!pet)
+				continue;
+
+			if (pet->IsFeared())
+				continue;
+
+			if ((pet->GetPetType() == petAnimation && aabonuses.PetCommands[PET_STANDUP]) ||
+				pet->GetPetType() != petAnimation) {
+
+				pet->SetFeigned(false);
+				pet->SayString(this, Chat::PetResponse, PET_SIT_STRING);
+				SetPetCommandState(PET_BUTTON_SIT, 0);
+				pet->SetPetOrder(SPO_Follow);
+				pet->SendAppearancePacket(AppearanceType::Animation, Animation::Standing);
+			}
 		}
-		break;
+
+		return;
 	}
+
 	case PET_SITDOWN: {
-		if (mypet->IsFeared()) break; //could be exploited like PET_BACKOFF
+		// Kraqur: Multiclass Pet - fan-out sit/stand commands to all owned pets
+		std::vector<Mob*> pets;
+		GetAllPets(pets);
 
-		if ((mypet->GetPetType() == petAnimation && aabonuses.PetCommands[PetCommand]) || mypet->GetPetType() != petAnimation) {
-			mypet->SetFeigned(false);
-			mypet->SayString(this, Chat::PetResponse, PET_SIT_STRING);
-			SetPetCommandState(PET_BUTTON_SIT, 1);
-			mypet->SetPetOrder(SPO_Sit);
-			mypet->SetRunAnimSpeed(0);
-			if (!mypet->UseBardSpellLogic())	//maybe we can have a bard pet
-				mypet->InterruptSpell(); //No cast 4 u. //i guess the pet should start casting
-			mypet->SendAppearancePacket(AppearanceType::Animation, Animation::Sitting);
+		for (Mob* pet : pets) {
+
+			if (!pet)
+				continue;
+
+			if (pet->IsFeared())
+				continue;
+
+			if ((pet->GetPetType() == petAnimation && aabonuses.PetCommands[PET_SITDOWN]) ||
+				pet->GetPetType() != petAnimation) {
+
+				pet->SetFeigned(false);
+				pet->SayString(this, Chat::PetResponse, PET_SIT_STRING);
+				SetPetCommandState(PET_BUTTON_SIT, 1);
+				pet->SetPetOrder(SPO_Sit);
+				pet->SetRunAnimSpeed(0);
+
+				if (!pet->UseBardSpellLogic())
+					pet->InterruptSpell();
+
+				pet->SendAppearancePacket(AppearanceType::Animation, Animation::Sitting);
+			}
 		}
-		break;
+
+		return;
 	}
+
 	case PET_HOLD: {
 		if (aabonuses.PetCommands[PetCommand] && mypet->IsNPC()) {
 			if (mypet->IsHeld())
@@ -11322,7 +11512,8 @@ void Client::Handle_OP_PetCommands(const EQApplicationPacket *app)
 				if (m_ClientVersionBit & EQ::versions::maskUFAndLater) {
 					MessageString(Chat::PetResponse, PET_ON_GHOLD);
 					mypet->SayString(this, Chat::PetResponse, PET_GHOLD_ON_MSG);
-				} else {
+				}
+				else {
 					mypet->SayString(this, Chat::PetResponse, PET_ON_HOLD);
 				}
 				mypet->SetGHeld(true);
@@ -11337,7 +11528,8 @@ void Client::Handle_OP_PetCommands(const EQApplicationPacket *app)
 			if (m_ClientVersionBit & EQ::versions::maskUFAndLater) {
 				MessageString(Chat::PetResponse, PET_ON_GHOLD);
 				mypet->SayString(this, Chat::PetResponse, PET_GHOLD_ON_MSG);
-			} else {
+			}
+			else {
 				mypet->SayString(this, Chat::PetResponse, PET_ON_HOLD);
 			}
 			mypet->SetGHeld(true);
@@ -11477,93 +11669,183 @@ void Client::Handle_OP_PetCommands(const EQApplicationPacket *app)
 		break;
 	}
 	case PET_STOP: {
-		if (mypet->IsFeared()) break; //could be exploited like PET_BACKOFF
+		// Kraqur: Multiclass Pet - fan-out stop commands to all owned pets
+		std::vector<Mob*> pets;
+		GetAllPets(pets);
 
-		if ((mypet->GetPetType() == petAnimation && aabonuses.PetCommands[PetCommand]) || mypet->GetPetType() != petAnimation) {
-			if (mypet->IsPetStop()) {
-				mypet->SetPetStop(false);
-			} else {
-				mypet->SetPetStop(true);
-				mypet->StopNavigation();
-				mypet->SetTarget(nullptr);
-				if (mypet->IsPetRegroup()) {
-					mypet->SetPetRegroup(false);
+		for (Mob* pet : pets) {
+
+			if (!pet)
+				continue;
+
+			if (pet->IsFeared())
+				continue; // could be exploited like PET_BACKOFF
+
+			if ((pet->GetPetType() == petAnimation && aabonuses.PetCommands[PET_STOP]) ||
+				pet->GetPetType() != petAnimation) {
+
+				if (pet->IsPetStop()) {
+					pet->SetPetStop(false);
+				}
+				else {
+					pet->SetPetStop(true);
+					pet->StopNavigation();
+					pet->SetTarget(nullptr);
+
+					if (pet->IsPetRegroup()) {
+						pet->SetPetRegroup(false);
+						SetPetCommandState(PET_BUTTON_REGROUP, 0);
+					}
+				}
+
+				pet->SayString(this, Chat::PetResponse, PET_GETLOST_STRING);
+			}
+		}
+
+		return;
+	}
+
+	case PET_STOP_ON: {
+		// Kraqur: Multiclass Pet - fan-out stop commands to all owned pets
+		std::vector<Mob*> pets;
+		GetAllPets(pets);
+
+		for (Mob* pet : pets) {
+
+			if (!pet)
+				continue;
+
+			if (pet->IsFeared())
+				continue;
+
+			if ((pet->GetPetType() == petAnimation && aabonuses.PetCommands[PET_STOP_ON]) ||
+				pet->GetPetType() != petAnimation) {
+
+				pet->SetPetStop(true);
+				pet->StopNavigation();
+				pet->SetTarget(nullptr);
+				pet->SayString(this, Chat::PetResponse, PET_GETLOST_STRING);
+
+				if (pet->IsPetRegroup()) {
+					pet->SetPetRegroup(false);
 					SetPetCommandState(PET_BUTTON_REGROUP, 0);
 				}
 			}
-			mypet->SayString(this, Chat::PetResponse, PET_GETLOST_STRING);
 		}
-		break;
-	}
-	case PET_STOP_ON: {
-		if (mypet->IsFeared()) break; //could be exploited like PET_BACKOFF
 
-		if ((mypet->GetPetType() == petAnimation && aabonuses.PetCommands[PetCommand]) || mypet->GetPetType() != petAnimation) {
-			mypet->SetPetStop(true);
-			mypet->StopNavigation();
-			mypet->SetTarget(nullptr);
-			mypet->SayString(this, Chat::PetResponse, PET_GETLOST_STRING);
-			if (mypet->IsPetRegroup()) {
-				mypet->SetPetRegroup(false);
-				SetPetCommandState(PET_BUTTON_REGROUP, 0);
+		return;
+	}
+
+	case PET_STOP_OFF: {
+		// Kraqur: Multiclass Pet - fan-out stop commands to all owned pets
+		std::vector<Mob*> pets;
+		GetAllPets(pets);
+
+		for (Mob* pet : pets) {
+
+			if (!pet)
+				continue;
+
+			if (pet->IsFeared())
+				continue;
+
+			if ((pet->GetPetType() == petAnimation && aabonuses.PetCommands[PET_STOP_OFF]) ||
+				pet->GetPetType() != petAnimation) {
+
+				pet->SetPetStop(false);
+				pet->SayString(this, Chat::PetResponse, PET_GETLOST_STRING);
 			}
 		}
-		break;
-	}
-	case PET_STOP_OFF: {
-		if (mypet->IsFeared()) break; //could be exploited like PET_BACKOFF
 
-		if ((mypet->GetPetType() == petAnimation && aabonuses.PetCommands[PetCommand]) || mypet->GetPetType() != petAnimation) {
-			mypet->SetPetStop(false);
-			mypet->SayString(this, Chat::PetResponse, PET_GETLOST_STRING);
-		}
-		break;
+		return;
 	}
+
 	case PET_REGROUP: {
-		if (mypet->IsFeared()) break; //could be exploited like PET_BACKOFF
+		// Kraqur: Multiclass Pet - fan-out regroup commands to all owned pets
+		std::vector<Mob*> pets;
+		GetAllPets(pets);
 
-		if (aabonuses.PetCommands[PetCommand]) {
-			if (mypet->IsPetRegroup()) {
-				mypet->SetPetRegroup(false);
-				mypet->SayString(this, Chat::PetResponse, PET_OFF_REGROUPING);
-			} else {
-				mypet->SetPetRegroup(true);
-				mypet->SetTarget(nullptr);
-				mypet->SayString(this, Chat::PetResponse, PET_ON_REGROUPING);
-				if (mypet->IsPetStop()) {
-					mypet->SetPetStop(false);
+		for (Mob* pet : pets) {
+
+			if (!pet)
+				continue;
+
+			if (pet->IsFeared())
+				continue; // could be exploited like PET_BACKOFF
+
+			if (aabonuses.PetCommands[PET_REGROUP]) {
+
+				if (pet->IsPetRegroup()) {
+					pet->SetPetRegroup(false);
+					pet->SayString(this, Chat::PetResponse, PET_OFF_REGROUPING);
+				}
+				else {
+					pet->SetPetRegroup(true);
+					pet->SetTarget(nullptr);
+					pet->SayString(this, Chat::PetResponse, PET_ON_REGROUPING);
+
+					if (pet->IsPetStop()) {
+						pet->SetPetStop(false);
+						SetPetCommandState(PET_BUTTON_STOP, 0);
+					}
+				}
+			}
+		}
+
+		return;
+	}
+
+	case PET_REGROUP_ON: {
+		// Kraqur: Multiclass Pet - fan-out regroup commands to all owned pets
+		std::vector<Mob*> pets;
+		GetAllPets(pets);
+
+		for (Mob* pet : pets) {
+
+			if (!pet)
+				continue;
+
+			if (pet->IsFeared())
+				continue;
+
+			if (aabonuses.PetCommands[PET_REGROUP_ON]) {
+
+				pet->SetPetRegroup(true);
+				pet->SetTarget(nullptr);
+				pet->SayString(this, Chat::PetResponse, PET_ON_REGROUPING);
+
+				if (pet->IsPetStop()) {
+					pet->SetPetStop(false);
 					SetPetCommandState(PET_BUTTON_STOP, 0);
 				}
 			}
 		}
-		break;
-	}
-	case PET_REGROUP_ON: {
-		if (mypet->IsFeared()) break; //could be exploited like PET_BACKOFF
 
-		if (aabonuses.PetCommands[PetCommand]) {
-			mypet->SetPetRegroup(true);
-			mypet->SetTarget(nullptr);
-			mypet->SayString(this, Chat::PetResponse, PET_ON_REGROUPING);
-			if (mypet->IsPetStop()) {
-				mypet->SetPetStop(false);
-				SetPetCommandState(PET_BUTTON_STOP, 0);
+		return;
+	}
+
+	case PET_REGROUP_OFF: {
+		// Kraqur: Multiclass Pet - fan-out regroup commands to all owned pets
+		std::vector<Mob*> pets;
+		GetAllPets(pets);
+
+		for (Mob* pet : pets) {
+
+			if (!pet)
+				continue;
+
+			if (pet->IsFeared())
+				continue;
+
+			if (aabonuses.PetCommands[PET_REGROUP_OFF]) {
+
+				pet->SetPetRegroup(false);
+				pet->SayString(this, Chat::PetResponse, PET_OFF_REGROUPING);
 			}
 		}
-		break;
-	}
-	case PET_REGROUP_OFF: {
-		if (mypet->IsFeared()) break; //could be exploited like PET_BACKOFF
 
-		if (aabonuses.PetCommands[PetCommand]) {
-			mypet->SetPetRegroup(false);
-			mypet->SayString(this, Chat::PetResponse, PET_OFF_REGROUPING);
+		return;
 		}
-		break;
-	}
-	default:
-		printf("Client attempted to use a unknown pet command:\n");
-		break;
 	}
 }
 

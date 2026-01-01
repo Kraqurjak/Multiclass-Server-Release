@@ -404,14 +404,31 @@ bool IsSummonSkeletonSpell(uint16 spell_id)
 	return IsEffectInSpell(spell_id, SE_NecPet);
 }
 
+// Kraqur: Multiclass Pet - expanded pet spell detection to include all pet summon effects
 bool IsSummonPetSpell(uint16 spell_id)
 {
-	return (
-		IsEffectInSpell(spell_id, SE_SummonPet) ||
-		IsEffectInSpell(spell_id, SE_SummonBSTPet) ||
-		IsEffectInSpell(spell_id, SE_Familiar)
-	);
+	if (!IsValidSpell(spell_id))
+		return false;
+
+	const SPDat_Spell_Struct* spell = &spells[spell_id];
+
+	for (int i = 0; i < EFFECT_COUNT; ++i)
+	{
+		switch (spell->effect_id[i])
+		{
+		case SE_SummonPet:       // 57
+		case SE_SummonBSTPet:    // 106
+		case SE_SummonHorse:     // 113
+		case SE_NecPet:          // 71
+			return true;
+		}
+	}
+
+	return false;
 }
+
+
+
 
 bool IsPetSpell(uint16 spell_id)
 {

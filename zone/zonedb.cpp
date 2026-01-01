@@ -3250,18 +3250,6 @@ void ZoneDatabase::SavePetInfo(Client *client)
 		}
 	}
 
-	CharacterPetInfoRepository::DeleteWhere(
-		database,
-		fmt::format(
-			"`char_id` = {}",
-			client->CharacterID()
-		)
-	);
-
-	if (!pet_infos.empty()) {
-		CharacterPetInfoRepository::InsertMany(database, pet_infos);
-	}
-
 	CharacterPetBuffsRepository::DeleteWhere(
 		database,
 		fmt::format(
@@ -3285,7 +3273,83 @@ void ZoneDatabase::SavePetInfo(Client *client)
 	if (!inventory.empty()) {
 		CharacterPetInventoryRepository::InsertMany(database, inventory);
 	}
+
+	// Kraqur: Multiclass Pet - persist all non-primary pets as secondary pet records
+	std::vector<Mob*> pets;
+	client->GetAllPets(pets);
+
+	// Remove old secondary pet records
+	//database.QueryDatabase(
+	//	fmt::format(
+	//		"DELETE FROM character_secondary_pets WHERE char_id = {}",
+	//		client->CharacterID()
+	//	)
+	//);
+
+	uint8 pet_index = 2;
+
+
+	for (Mob* mob : pets) {
+		if (!mob) {
+			continue;
+		}
+
+		// Kraqur: skip UI pet; only saving secondary pets here
+		if (mob->GetID() == client->GetPetID()) {
+			continue;
+		}
+
+		NPC* pet = mob->CastToNPC();
+		if (!pet) {
+			continue;
+		}
+
+		pet_info.char_id = client->CharacterID();
+		pet_info.pet = pet_index;
+		pet_info.petname = pet->GetName();
+		pet_info.petpower = pet->GetPetPower();
+		pet_info.spell_id = pet->GetPetSpellID();
+		pet_info.hp = pet->GetHP();
+		pet_info.mana = pet->GetMana();
+		pet_info.size = pet->GetSize();
+		pet_info.taunting = pet->IsTaunting() ? 1 : 0;
+
+		// Kraqur: record secondary pet entry for DB persistence
+		pet_infos.push_back(pet_info);
+
+		// database.QueryDatabase(
+		//  fmt::format(
+		//      "INSERT INTO character_secondary_pets "
+		//      "(char_id, pet_index, pet_name, petpower, spell_id, hp, mana, size, taunting) "
+		//      "VALUES ({}, {}, '{}', {}, {}, {}, {}, {}, {})",
+		//      client->CharacterID(),
+		//      pet_index,
+		//      Strings::Escape(pet->GetName()),
+		//      pet->GetPetPower(),
+		//      pet->GetPetSpellID(),
+		//      pet->GetHP(),
+		//      pet->GetMana(),
+		//      pet->GetSize(),
+		//      pet->IsTaunting() ? 1 : 0
+		//  )
+		// );
+
+		++pet_index;
+	}
+
+	CharacterPetInfoRepository::DeleteWhere(
+		database,
+		fmt::format(
+			"`char_id` = {}",
+			client->CharacterID()
+		)
+	);
+
+	if (!pet_infos.empty()) {
+		CharacterPetInfoRepository::InsertMany(database, pet_infos);
+	}
 }
+
 
 void ZoneDatabase::RemoveTempFactions(Client *client) {
 
@@ -3293,6 +3357,7 @@ void ZoneDatabase::RemoveTempFactions(Client *client) {
                                     "WHERE temp = 1 AND char_id = %u",
                                     client->CharacterID());
 	QueryDatabase(query);
+
 }
 
 void ZoneDatabase::UpdateItemRecast(uint32 character_id, uint32 recast_type, uint32 timestamp)
@@ -3319,14 +3384,17 @@ void ZoneDatabase::DeleteItemRecast(uint32 character_id, uint32 recast_type)
 	);
 }
 
-void ZoneDatabase::LoadPetInfo(Client *client)
+void ZoneDatabase::LoadPetInfo(Client* client)
 {
 	// Load current pet and suspended pet
-	auto pet_info           = client->GetPetInfo(PetInfoType::Current);
+	auto pet_info = client->GetPetInfo(PetInfoType::Current);
 	auto suspended_pet_info = client->GetPetInfo(PetInfoType::Suspended);
 
 	memset(pet_info, 0, sizeof(PetInfo));
 	memset(suspended_pet_info, 0, sizeof(PetInfo));
+
+	// Kraqur: reset secondary pet list before loading from DB
+	client->ClearSecondaryPetInfos();
 
 	const auto& info = CharacterPetInfoRepository::GetWhere(
 		database,
@@ -3340,27 +3408,46 @@ void ZoneDatabase::LoadPetInfo(Client *client)
 		return;
 	}
 
-	PetInfo* p;
+	PetInfo* p = nullptr;
 
 	for (const auto& e : info) {
 		if (e.pet == PetInfoType::Current) {
 			p = pet_info;
-		} else if (e.pet == PetInfoType::Suspended) {
+		}
+		else if (e.pet == PetInfoType::Suspended) {
 			p = suspended_pet_info;
-		} else {
+		}
+
+		// Kraqur: load secondary pet record into client's secondary pet list
+		else if (e.pet >= 2) {
+			PetInfo sec_pet;
+			memset(&sec_pet, 0, sizeof(PetInfo));
+
+			strn0cpy(sec_pet.Name, e.petname.c_str(), sizeof(sec_pet.Name));
+			sec_pet.petpower = e.petpower;
+			sec_pet.SpellID = e.spell_id;
+			sec_pet.HP = e.hp;
+			sec_pet.Mana = e.mana;
+			sec_pet.size = e.size;
+			sec_pet.taunting = e.taunting;
+
+			client->AddSecondaryPetInfo(sec_pet);
+			continue;
+		}
+		else {
 			continue;
 		}
 
 		strn0cpy(p->Name, e.petname.c_str(), sizeof(p->Name));
-
 		p->petpower = e.petpower;
-		p->SpellID  = e.spell_id;
-		p->HP       = e.hp;
-		p->Mana     = e.mana;
-		p->size     = e.size;
+		p->SpellID = e.spell_id;
+		p->HP = e.hp;
+		p->Mana = e.mana;
+		p->size = e.size;
 		p->taunting = e.taunting;
 	}
 
+	// Load pet buffs
 	const auto& buffs = CharacterPetBuffsRepository::GetWhere(
 		database,
 		fmt::format(
@@ -3373,9 +3460,11 @@ void ZoneDatabase::LoadPetInfo(Client *client)
 		for (const auto& e : buffs) {
 			if (e.pet == PetInfoType::Current) {
 				p = pet_info;
-			} else if (e.pet == PetInfoType::Suspended) {
+			}
+			else if (e.pet == PetInfoType::Suspended) {
 				p = suspended_pet_info;
-			} else {
+			}
+			else {
 				continue;
 			}
 
@@ -3387,42 +3476,21 @@ void ZoneDatabase::LoadPetInfo(Client *client)
 				continue;
 			}
 
-			p->Buffs[e.slot].spellid       = e.spell_id;
-			p->Buffs[e.slot].level         = e.caster_level;
-			p->Buffs[e.slot].player_id     = 0;
-			p->Buffs[e.slot].effect_type   = BuffEffectType::Buff;
-			p->Buffs[e.slot].duration      = e.ticsremaining;
-			p->Buffs[e.slot].counters      = e.counters;
+			p->Buffs[e.slot].spellid = e.spell_id;
+			p->Buffs[e.slot].level = e.caster_level;
+			p->Buffs[e.slot].player_id = 0;
+			p->Buffs[e.slot].effect_type = BuffEffectType::Buff;
+			p->Buffs[e.slot].duration = e.ticsremaining;
+			p->Buffs[e.slot].counters = e.counters;
 			p->Buffs[e.slot].bard_modifier = e.instrument_mod;
 		}
 	}
 
-	const auto& inventory = CharacterPetInventoryRepository::GetWhere(
-		database,
-		fmt::format(
-			"`char_id` = {}",
-			client->CharacterID()
-		)
-	);
-
-	if (!inventory.empty()) {
-		for (const auto& e : inventory) {
-			if (e.pet == PetInfoType::Current) {
-				p = pet_info;
-			} else if (e.pet == PetInfoType::Suspended) {
-				p = suspended_pet_info;
-			} else {
-				continue;
-			}
-
-			if (!EQ::ValueWithin(e.slot, EQ::invslot::EQUIPMENT_BEGIN, EQ::invslot::EQUIPMENT_END)) {
-				continue;
-			}
-
-			p->Items[e.slot] = e.item_id;
-		}
-	}
+	// Kraqur: Multiclass Pet - do not load pet inventory; Syncrosatchel rebuilds equipment dynamically
+	//schedule deferred buff sync for all owned pets
+	client->m_pending_pet_buff_sync = true;
 }
+
 
 bool ZoneDatabase::GetFactionData(FactionMods* fm, uint32 class_mod, uint32 race_mod, uint32 deity_mod, int32 faction_id) {
 	if (faction_id <= 0 || faction_id > (int32) max_faction)

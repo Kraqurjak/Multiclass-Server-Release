@@ -727,7 +727,7 @@ void Client::ProcessMovePC(uint32 zoneID, uint32 instance_id, float x, float y, 
 void Client::ZonePC(uint32 zoneID, uint32 instance_id, float x, float y, float z, float heading, uint8 ignorerestrictions, ZoneMode zm) {
 	bool ReadyToZone = true;
 	int iZoneNameLength = 0;
-	const char*	pShortZoneName = nullptr;
+	const char* pShortZoneName = nullptr;
 	char* pZoneName = nullptr;
 
 	pShortZoneName = ZoneName(zoneID);
@@ -751,64 +751,64 @@ void Client::ZonePC(uint32 zoneID, uint32 instance_id, float x, float y, float z
 
 	cheat_manager.SetExemptStatus(Port, true);
 
-	if(!pZoneName) {
+	if (!pZoneName) {
 		Message(Chat::Red, "Invalid zone number specified");
 		safe_delete_array(pZoneName);
 		return;
 	}
 	iZoneNameLength = strlen(pZoneName);
 	glm::vec4 zone_safe_point;
-	switch(zm) {
-		case EvacToSafeCoords:
-		case ZoneToSafeCoords:
-			zone_safe_point = zone->GetSafePoint();
-			x = zone_safe_point.x;
-			y = zone_safe_point.y;
-			z = zone_safe_point.z;
-			heading = zone_safe_point.w;
-			break;
-		case GMSummon:
-		case GMHiddenSummon:
-			m_Position = glm::vec4(x, y, z, heading);
-			m_ZoneSummonLocation = m_Position;
-			zonesummon_id = zoneID;
-			zonesummon_ignorerestrictions = 1;
-			break;
-		case ZoneSolicited:
-			m_ZoneSummonLocation = glm::vec4(x, y, z, heading);
-			zonesummon_id = zoneID;
-			zonesummon_ignorerestrictions = ignorerestrictions;
-			break;
-		case GateToBindPoint:
-			x = m_Position.x = m_pp.binds[0].x;
-			y = m_Position.y = m_pp.binds[0].y;
-			z = m_Position.z = m_pp.binds[0].z;
-			heading = m_pp.binds[0].heading;
-			break;
-		case ZoneToBindPoint:
-			x = m_Position.x = m_pp.binds[0].x;
-			y = m_Position.y = m_pp.binds[0].y;
-			z = m_Position.z = m_pp.binds[0].z;
-			heading = m_pp.binds[0].heading;
-			zonesummon_ignorerestrictions = 1;
-			LogDebug("Player [{}] has died and will be zoned to bind point in zone: [{}] at LOC x=[{}], y=[{}], z=[{}], heading=[{}]",
-					GetName(), pZoneName, m_pp.binds[0].x, m_pp.binds[0].y, m_pp.binds[0].z, m_pp.binds[0].heading);
-			break;
-		case SummonPC:
-			m_ZoneSummonLocation = glm::vec4(x, y, z, heading);
-			m_Position = m_ZoneSummonLocation;
-			break;
-		case Rewind:
-			LogDebug("[{}] has requested a /rewind from [{}], [{}], [{}], to [{}], [{}], [{}] in [{}]", GetName(),
-					m_Position.x, m_Position.y, m_Position.z,
-					m_RewindLocation.x, m_RewindLocation.y, m_RewindLocation.z, zone->GetShortName());
-			m_ZoneSummonLocation = glm::vec4(x, y, z, heading);
-			m_Position = m_ZoneSummonLocation;
-			break;
-		default:
-			LogError("Client::ZonePC() received a reguest to perform an unsupported client zone operation");
-			ReadyToZone = false;
-			break;
+	switch (zm) {
+	case EvacToSafeCoords:
+	case ZoneToSafeCoords:
+		zone_safe_point = zone->GetSafePoint();
+		x = zone_safe_point.x;
+		y = zone_safe_point.y;
+		z = zone_safe_point.z;
+		heading = zone_safe_point.w;
+		break;
+	case GMSummon:
+	case GMHiddenSummon:
+		m_Position = glm::vec4(x, y, z, heading);
+		m_ZoneSummonLocation = m_Position;
+		zonesummon_id = zoneID;
+		zonesummon_ignorerestrictions = 1;
+		break;
+	case ZoneSolicited:
+		m_ZoneSummonLocation = glm::vec4(x, y, z, heading);
+		zonesummon_id = zoneID;
+		zonesummon_ignorerestrictions = ignorerestrictions;
+		break;
+	case GateToBindPoint:
+		x = m_Position.x = m_pp.binds[0].x;
+		y = m_Position.y = m_pp.binds[0].y;
+		z = m_Position.z = m_pp.binds[0].z;
+		heading = m_pp.binds[0].heading;
+		break;
+	case ZoneToBindPoint:
+		x = m_Position.x = m_pp.binds[0].x;
+		y = m_Position.y = m_pp.binds[0].y;
+		z = m_Position.z = m_pp.binds[0].z;
+		heading = m_pp.binds[0].heading;
+		zonesummon_ignorerestrictions = 1;
+		LogDebug("Player [{}] has died and will be zoned to bind point in zone: [{}] at LOC x=[{}], y=[{}], z=[{}], heading=[{}]",
+			GetName(), pZoneName, m_pp.binds[0].x, m_pp.binds[0].y, m_pp.binds[0].z, m_pp.binds[0].heading);
+		break;
+	case SummonPC:
+		m_ZoneSummonLocation = glm::vec4(x, y, z, heading);
+		m_Position = m_ZoneSummonLocation;
+		break;
+	case Rewind:
+		LogDebug("[{}] has requested a /rewind from [{}], [{}], [{}], to [{}], [{}], [{}] in [{}]", GetName(),
+			m_Position.x, m_Position.y, m_Position.z,
+			m_RewindLocation.x, m_RewindLocation.y, m_RewindLocation.z, zone->GetShortName());
+		m_ZoneSummonLocation = glm::vec4(x, y, z, heading);
+		m_Position = m_ZoneSummonLocation;
+		break;
+	default:
+		LogError("Client::ZonePC() received a reguest to perform an unsupported client zone operation");
+		ReadyToZone = false;
+		break;
 	}
 
 	if (ReadyToZone)
@@ -841,17 +841,18 @@ void Client::ZonePC(uint32 zoneID, uint32 instance_id, float x, float y, float z
 		zone_mode = zm;
 		if (zm == ZoneToBindPoint) {
 			auto outapp = new EQApplicationPacket(OP_ZonePlayerToBind,
-							      sizeof(ZonePlayerToBind_Struct) + iZoneNameLength);
-			ZonePlayerToBind_Struct* gmg = (ZonePlayerToBind_Struct*) outapp->pBuffer;
+				sizeof(ZonePlayerToBind_Struct) + iZoneNameLength);
+			ZonePlayerToBind_Struct* gmg = (ZonePlayerToBind_Struct*)outapp->pBuffer;
 
 			// If we are SoF and later and are respawning from hover, we want the real zone ID, else zero to use the old hack.
 			//
-			if(zone->GetZoneID() == zoneID) {
+			if (zone->GetZoneID() == zoneID) {
 				if ((ClientVersionBit() & EQ::versions::maskSoFAndLater) && (!RuleB(Character, RespawnFromHover) || !IsHoveringForRespawn()))
 					gmg->bind_zone_id = 0;
 				else
 					gmg->bind_zone_id = zoneID;
-			} else {
+			}
+			else {
 				gmg->bind_zone_id = zoneID;
 			}
 
@@ -864,10 +865,10 @@ void Client::ZonePC(uint32 zoneID, uint32 instance_id, float x, float y, float z
 			outapp->priority = 6;
 			FastQueuePacket(&outapp);
 		}
-		else if(zm == ZoneSolicited || zm == ZoneToSafeCoords) {
+		else if (zm == ZoneSolicited || zm == ZoneToSafeCoords) {
 			auto outapp =
-			    new EQApplicationPacket(OP_RequestClientZoneChange, sizeof(RequestClientZoneChange_Struct));
-			RequestClientZoneChange_Struct* gmg = (RequestClientZoneChange_Struct*) outapp->pBuffer;
+				new EQApplicationPacket(OP_RequestClientZoneChange, sizeof(RequestClientZoneChange_Struct));
+			RequestClientZoneChange_Struct* gmg = (RequestClientZoneChange_Struct*)outapp->pBuffer;
 
 			gmg->zone_id = zoneID;
 			gmg->x = x;
@@ -880,9 +881,9 @@ void Client::ZonePC(uint32 zoneID, uint32 instance_id, float x, float y, float z
 			outapp->priority = 6;
 			FastQueuePacket(&outapp);
 		}
-		else if(zm == EvacToSafeCoords) {
+		else if (zm == EvacToSafeCoords) {
 			auto outapp = new EQApplicationPacket(OP_RequestClientZoneChange, sizeof(RequestClientZoneChange_Struct));
-			RequestClientZoneChange_Struct* gmg = (RequestClientZoneChange_Struct*) outapp->pBuffer;
+			RequestClientZoneChange_Struct* gmg = (RequestClientZoneChange_Struct*)outapp->pBuffer;
 
 			// if we are in the same zone we want to evac to, client will not send OP_ZoneChange back to do an actual
 			// zoning of the client, so we have to send a viable zoneid that the client *could* zone to to make it believe
@@ -894,7 +895,8 @@ void Client::ZonePC(uint32 zoneID, uint32 instance_id, float x, float y, float z
 
 			if (GetZoneID() == 1) {
 				gmg->zone_id = 2;
-			} else {
+			}
+			else {
 				gmg->zone_id = 1;
 			}
 
@@ -912,7 +914,7 @@ void Client::ZonePC(uint32 zoneID, uint32 instance_id, float x, float y, float z
 			FastQueuePacket(&outapp);
 		}
 		else {
-			if(zoneID == GetZoneID()) {
+			if (zoneID == GetZoneID()) {
 				//properly handle proximities
 				entity_list.ProcessMove(this, glm::vec3(m_Position));
 				m_Proximity = glm::vec3(m_Position);
@@ -922,8 +924,8 @@ void Client::ZonePC(uint32 zoneID, uint32 instance_id, float x, float y, float z
 			}
 
 			auto outapp =
-			    new EQApplicationPacket(OP_RequestClientZoneChange, sizeof(RequestClientZoneChange_Struct));
-			RequestClientZoneChange_Struct* gmg = (RequestClientZoneChange_Struct*) outapp->pBuffer;
+				new EQApplicationPacket(OP_RequestClientZoneChange, sizeof(RequestClientZoneChange_Struct));
+			RequestClientZoneChange_Struct* gmg = (RequestClientZoneChange_Struct*)outapp->pBuffer;
 
 			gmg->zone_id = zoneID;
 			gmg->x = x;
@@ -940,9 +942,9 @@ void Client::ZonePC(uint32 zoneID, uint32 instance_id, float x, float y, float z
 		//Clear zonesummon variables if we're zoning to our own zone
 		//Client wont generate a zone change packet to the server in this case so
 		//They aren't needed and it keeps behavior on next zone attempt from being undefined.
-		if(zoneID == zone->GetZoneID() && instance_id == zone->GetInstanceID())
+		if (zoneID == zone->GetZoneID() && instance_id == zone->GetInstanceID())
 		{
-			if(zm != EvacToSafeCoords && zm != ZoneToSafeCoords && zm != ZoneToBindPoint)
+			if (zm != EvacToSafeCoords && zm != ZoneToSafeCoords && zm != ZoneToBindPoint)
 			{
 				m_ZoneSummonLocation = glm::vec4();
 				zonesummon_id = 0;
@@ -951,8 +953,28 @@ void Client::ZonePC(uint32 zoneID, uint32 instance_id, float x, float y, float z
 			}
 		}
 	}
+	LogDebug("Player [{}] has requested a zoning to LOC x=[{}], y=[{}], z=[{}], heading=[{}] in zoneid=[{}]", GetName(), x, y, z, heading, zoneID);
+	//Clear zonesummon variables if we're zoning to our own zone
+	//Client wont generate a zone change packet to the server in this case so
+	//They aren't needed and it keeps behavior on next zone attempt from being undefined.
+	if (zoneID == zone->GetZoneID() && instance_id == zone->GetInstanceID())
+	{
+		if (zm != EvacToSafeCoords && zm != ZoneToSafeCoords && zm != ZoneToBindPoint)
+		{
+			m_ZoneSummonLocation = glm::vec4();
+			zonesummon_id = 0;
+			zonesummon_ignorerestrictions = 0;
+			zone_mode = ZoneUnsolicited;
+		}
+	}
 
-	safe_delete_array(pZoneName);
+	// Kraqur: Multiclass Pet - preserve all pet state during zone transfer; do not clear pet slots on zone-out
+	if (zoneID != zone->GetZoneID() || instance_id != zone->GetInstanceID()) {
+		Log(Logs::General, Logs::Spells,
+			"Multiclass Enforcement: [%s] zoning to %u (%u) — preserving pet state for zone transfer",
+			GetName(), zoneID, instance_id
+		);
+	}
 }
 
 void Client::GoToSafeCoords(uint16 zone_id, uint16 instance_id)

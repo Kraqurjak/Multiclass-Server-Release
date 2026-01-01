@@ -516,6 +516,13 @@ bool Client::Process() {
 			DoManaRegen();
 			DoEnduranceRegen();
 			BuffProcess();
+			// Kraqur: Multiclass Pet - deferred restore of all pet buffs after zoning/login
+			//Multiclass Pet Buffs
+			//Sync All Pet Buffs From DB
+			if (m_pending_pet_buff_sync) {
+				SyncAllPetBuffsFromDB();
+				m_pending_pet_buff_sync = false;
+			}
 
 			if (GetTarget()) {
 				GetTarget()->SendBuffsToClient(this);
@@ -697,8 +704,21 @@ bool Client::Process() {
 	return ret;
 }
 
+// Kraqur: Multiclass Pet - ensure all secondary pets are despawned on actual disconnect
 /* Just a set of actions preformed all over in Client::Process */
 void Client::OnDisconnect(bool hard_disconnect) {
+	// Despawn secondary pets on actual disconnect
+	std::vector<Mob*> pets;
+	GetAllPets(pets);
+
+	for (Mob* mob : pets) {
+		if (!mob) {
+			continue;
+		}
+
+		mob->Depop();
+	}
+
 	if (hard_disconnect) {
 		LeaveGroup();
 

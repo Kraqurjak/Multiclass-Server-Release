@@ -26,6 +26,7 @@ class ExpeditionLockoutTimer;
 class ExpeditionRequest;
 class Group;
 class NPC;
+class Pet;
 class Object;
 class Raid;
 class Seperator;
@@ -392,6 +393,39 @@ public:
 	void ReloadExpansionProfileSetting();
 
 	void SetPetCommandState(int button, int state);
+
+	// Start Multiclass Pet Bags
+	const EQ::ItemInstance* FindSyncrosatchelForClass(uint8 class_id) const;
+	void SyncPetFromSyncrosatchel(Pet* pet, uint8 pet_class);
+	// End Multiclass Pet Bags
+
+	// Start Multiclass Pet Helpers
+	bool HasClassPet(uint8 class_id) const;
+	uint16 GetClassPetID(uint8 class_id) const;
+	void SetClassPetID(uint8 class_id, uint16 pet_id);
+	void ClearClassPet(uint8 class_id, uint16 pet_id = 0);
+	//void ClearAllClassPets();
+	void GetAllPets(std::vector<Mob*>& pets);
+	uint8 GetSpellClass(uint16 spell_id) const;
+	bool IsPetSpell(uint16 spell_id) const;
+	bool IsSummonPetSpell(uint16 spell_id) const;
+	//bool IsCharmPetSpell(uint16 spell_id) const;
+	//void AddPetToOwner(Mob* pet);
+	void SetUIPetID(uint16 new_pet_id);
+	void ClearClassPetByPetID(uint16 pet_id);
+	void ExecutePetCommand(Mob* pet, uint32 command, Mob* target);
+	void SpawnSecondaryPets();
+	bool m_pending_pet_buff_sync = false;
+	void SyncAllPetBuffsFromDB();
+	bool HasAnyPet() const;
+
+
+
+
+
+
+	//End Multiclass Pet Helpers
+
 
 	bool AutoAttackEnabled() const { return auto_attack; }
 	bool AutoFireEnabled() const { return auto_fire; }
@@ -1758,7 +1792,8 @@ protected:
 	char *adv_data;
 
 private:
-
+	// Kraqur: Multiclass Pet - per-class pet instance IDs indexed by class_id
+	uint16 m_class_pet_ids[16] = { 0 };
 	eqFilterMode ClientFilters[_FilterCount];
 	int32 HandlePacket(const EQApplicationPacket *app);
 	void OPTGB(const EQApplicationPacket *app);
@@ -1892,6 +1927,9 @@ private:
 	// https://github.com/EQEmu/Server/pull/2479
 	bool m_lock_save_position = false;
 public:
+	void SetPetUIID(uint16 new_pet_id);
+	void ClearSecondaryPetInfos() { m_secondary_pet_infos.clear(); }
+	void AddSecondaryPetInfo(const PetInfo& info) { m_secondary_pet_infos.push_back(info); }
 	bool IsLockSavePosition() const;
 	void SetLockSavePosition(bool lock_save_position);
 private:
@@ -1902,6 +1940,7 @@ private:
 	Object* m_tradeskill_object;
 	PetInfo m_petinfo; // current pet data, used while loading from and saving to DB
 	PetInfo m_suspendedminion; // pet data for our suspended minion.
+	std::vector<PetInfo> m_secondary_pet_infos;
 	MercInfo m_mercinfo[MAXMERCS]; // current mercenary
 	InspectMessage_Struct m_inspect_message;
 	bool temp_pvp;

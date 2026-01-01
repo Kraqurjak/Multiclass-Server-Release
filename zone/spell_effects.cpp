@@ -1289,35 +1289,76 @@ bool Mob::SpellEffect(Mob* caster, uint16 spell_id, float partial, int level_ove
 #ifdef SPELL_EFFECT_SPAM
 				snprintf(effect_desc, _EDLEN, "Summon %s: %s", (effect==SE_Familiar)?"Familiar":"Pet", spell.teleport_zone);
 #endif
-				if(GetPet())
-				{
-					MessageString(Chat::Shout, ONLY_ONE_PET);
-				}
-				else
-				{
-					MakePet(spell_id, spell.teleport_zone);
-					// TODO: we need to sync the states for these clients ...
-					// Will fix buttons for now
-					Mob *pet=GetPet();
-					if (IsClient() && pet) {
-						auto c = CastToClient();
-						if (c->ClientVersionBit() & EQ::versions::maskUFAndLater) {
-							c->SetPetCommandState(PET_BUTTON_SIT, 0);
-							c->SetPetCommandState(PET_BUTTON_STOP, 0);
-							c->SetPetCommandState(PET_BUTTON_REGROUP, 0);
-							c->SetPetCommandState(PET_BUTTON_FOLLOW, 1);
-							c->SetPetCommandState(PET_BUTTON_GUARD, 0);
-							// Creating pet from spell - taunt always false
-							// If suspended pet - that will be restore there
-							// If logging in, client will send toggle
-							c->SetPetCommandState(PET_BUTTON_HOLD, 0);
-							c->SetPetCommandState(PET_BUTTON_GHOLD, 0);
-							c->SetPetCommandState(PET_BUTTON_FOCUS, 0);
-							c->SetPetCommandState(PET_BUTTON_SPELLHOLD, 0);
-						}
-					}
-				}
-				break;
+// Kraqur: Multiclass Pet - override legacy single-pet restriction and support multiple owned pets
+// block summoning if primary pet is charmed (matches legacy safety rule)
+Mob* primary = GetPet();
+if (primary && primary->IsCharmed()) {
+    MessageString(Chat::Shout, ONLY_ONE_PET);
+    break;
+}
+
+// Kraqur: snapshot existing owned pet IDs to detect which pet is newly created
+std::vector<uint16> old_pet_ids;
+auto& mob_list = entity_list.GetMobList(); // NOTE: this is a reference, not a pointer
+
+for (auto it = mob_list.begin(); it != mob_list.end(); ++it) {
+    Mob* m = it->second;
+    if (m && m->GetOwnerID() == GetID()) {
+        old_pet_ids.push_back(m->GetID());
+    }
+}
+
+// Kraqur: summon the new pet (may be primary or secondary)
+MakePet(spell_id, spell.teleport_zone);
+
+// Kraqur: identify the newly created pet by comparing against pre-summon ID list
+Mob* new_pet = nullptr;
+for (auto it = mob_list.begin(); it != mob_list.end(); ++it) {
+    Mob* m = it->second;
+    if (m && m->GetOwnerID() == GetID()) {
+
+        uint16 id = m->GetID();
+        bool found = false;
+
+        for (size_t i = 0; i < old_pet_ids.size(); ++i) {
+            if (old_pet_ids[i] == id) {
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            new_pet = m;
+            break;
+        }
+    }
+}
+
+// If MakePet failed, stop
+if (!new_pet) {
+    break;
+}
+
+// Kraqur: initialize pet command UI ONLY for the primary (UI) pet
+if (IsClient()) {
+    auto c = CastToClient();
+
+    if (new_pet->GetID() == GetPetID()) {
+        if (c->ClientVersionBit() & EQ::versions::maskUFAndLater) {
+            c->SetPetCommandState(PET_BUTTON_SIT, 0);
+            c->SetPetCommandState(PET_BUTTON_STOP, 0);
+            c->SetPetCommandState(PET_BUTTON_REGROUP, 0);
+            c->SetPetCommandState(PET_BUTTON_FOLLOW, 1);
+            c->SetPetCommandState(PET_BUTTON_GUARD, 0);
+            c->SetPetCommandState(PET_BUTTON_HOLD, 0);
+            c->SetPetCommandState(PET_BUTTON_GHOLD, 0);
+            c->SetPetCommandState(PET_BUTTON_FOCUS, 0);
+            c->SetPetCommandState(PET_BUTTON_SPELLHOLD, 0);
+        }
+    }
+}
+// Kraqur: end multiclass pet override
+break;
 			}
 
 			case SE_DivineAura:

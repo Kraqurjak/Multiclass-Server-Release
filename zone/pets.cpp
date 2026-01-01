@@ -89,10 +89,46 @@ void Mob::MakePet(uint16 spell_id, const char* pettype, const char *petname) {
 // stay equipped when the character zones. petpower of -1 means that the currently equipped petfocus
 // of a client is searched for and used instead.
 void Mob::MakePoweredPet(uint16 spell_id, const char* pettype, int16 petpower,
-		const char *petname, float in_size) {
+	const char* petname, float in_size) {
 	// Sanity and early out checking first.
-	if(HasPet() || pettype == nullptr)
+	if (pettype == nullptr)
 		return;
+
+	// Allow multiple summoned pets (multiclass),
+	// but still block summoning if the existing pet is charmed.
+	Mob* existing = GetPet();
+	if (existing && existing->IsCharmed())
+		return;
+	// Kraqur: Multiclass Pet - block summoning if this class already controls a pet
+	if (IsClient() && RuleB(Custom, MulticlassingEnabled)) {
+		Client* c = CastToClient();
+		//c->Message(Chat::Yellow, "DEBUG: Pre-summon check entered.");
+
+		if (c->IsSummonPetSpell(spell_id)) {
+			//c->Message(Chat::Yellow, "DEBUG: IsSummonPetSpell = true for spell %d.", spell_id);
+			uint8 pet_class = c->GetSpellClass(spell_id);
+			//c->Message(Chat::Yellow, "DEBUG: GetSpellClass returned class %d.", pet_class);
+
+			if (pet_class != Class::None) {
+				if (c->HasClassPet(pet_class)) {
+					//c->Message(Chat::Red, "DEBUG: HasClassPet(%d) = true. Blocking summon.", pet_class);
+					//c->Message(Chat::Red, "You already control a pet for this class.");
+					return;
+				}
+				else {
+					//c->Message(Chat::Yellow, "DEBUG: HasClassPet(%d) = false. Allowing summon.", pet_class);
+				}
+			}
+			else {
+				//c->Message(Chat::Yellow, "DEBUG: pet_class == Class::None. No class mapping.");
+			}
+		}
+		else {
+			//c->Message(Chat::Yellow, "DEBUG: IsSummonPetSpell = false for spell %d.", spell_id);
+		}
+	}
+
+
 
 	int16 act_power = 0; // The actual pet power we'll use.
 	if (petpower == -1) {
@@ -259,30 +295,97 @@ void Mob::MakePoweredPet(uint16 spell_id, const char* pettype, int16 petpower,
 	//this takes ownership of the npc_type data
 	auto npc = new Pet(npc_type, this, (PetType)record.petcontrol, spell_id, record.petpower);
 
-	// Now that we have an actual object to interact with, load
-	// the base items for the pet. These are always loaded
-	// so that a rank 1 suspend minion does not kill things
-	// like the special back items some focused pets may receive.
+	
+
+
+
+	// Kraqur: Multiclass Pet - assign owner and classify UI vs extra pet before AddNPC
+	if (IsClient() && RuleB(Custom, MulticlassingEnabled)) {
+		Client* c = CastToClient();
+
+		npc->SetOwnerID(c->GetID());
+
+
+		// UI pet vs extra pets
+		if (c->GetPetID() == 0) {
+			npc->SetPetType((PetType)record.petcontrol); // UI pet
+		}
+		else {
+			npc->SetPetType(petOther); // extra pet
+		}
+	}
+
+	// Add NPC to world ONCE
+	entity_list.AddNPC(npc, true, true);
+	npc->SetPetOwnerClient(true);
+	npc->SetPetOwnerNPC(false);
+
+	Client* c = CastToClient();
+
+	// Kraqur: Multiclass Pet - all pets appear in Extended Target as MyPetTarget
+	// Not working as intended yet, needs more testing
+	c->UpdateXTargetType(MyPetTarget, npc);
+
+	// Kraqur: Multiclass Pet - first summoned pet becomes the UI pet
+	// ONLY the first pet becomes the active UI pet
+	if (c->GetPetID() == 0) {
+		c->SetUIPetID(npc->GetID());
+	}
+
+
+
+	// Load base pet items AFTER AddNPC
 	uint32 petinv[EQ::invslot::EQUIPMENT_COUNT];
 	memset(petinv, 0, sizeof(petinv));
-	const EQ::ItemData *item = nullptr;
+	const EQ::ItemData* item = nullptr;
 
 	if (content_db.GetBasePetItems(record.equipmentset, petinv)) {
-		for (int i = EQ::invslot::EQUIPMENT_BEGIN; i <= EQ::invslot::EQUIPMENT_END; i++)
+		for (int i = EQ::invslot::EQUIPMENT_BEGIN; i <= EQ::invslot::EQUIPMENT_END; i++) {
 			if (petinv[i]) {
 				item = database.GetItem(petinv[i]);
 				npc->AddLootDrop(item, LootdropEntriesRepository::NewNpcEntity(), true);
 			}
+		}
+	}
+
+	//Multiclass Pet Bags
+	// Kraqur: Multiclass Pet - apply Syncrosatchel equipment to this pet
+	if (IsClient()) {
+		Client* c = CastToClient();
+		uint8 pet_class = c->GetSpellClass(spell_id);
+		c->SyncPetFromSyncrosatchel(npc, pet_class);
 	}
 
 	npc->UpdateEquipmentLight();
 
-	// finally, override size if one was provided
+	// Override size if provided
 	if (in_size > 0.0f)
 		npc->size = in_size;
 
-	entity_list.AddNPC(npc, true, true);
-	SetPetID(npc->GetID());
+	// Kraqur: Multiclass Pet - register this pet as the active pet for its class
+	// === Multiclass Pet Enforcement: Register Pet ===
+	if (IsClient() && RuleB(Custom, MulticlassingEnabled)) {
+		Client* c = CastToClient();
+
+		if (c->IsSummonPetSpell(spell_id)) {
+			uint8 pet_class = c->GetSpellClass(spell_id);
+			c->Message(Chat::Yellow, "DEBUG: Registering pet for class %d, pet id %d.", pet_class, npc->GetID());
+
+			if (pet_class != Class::None) {
+				c->SetClassPetID(pet_class, npc->GetID());
+				npc->SetOwnerID(c->GetID());
+			}
+			else {
+				c->Message(Chat::Yellow, "DEBUG: Register skipped: pet_class == Class::None.");
+			}
+		}
+		else {
+			c->Message(Chat::Yellow, "DEBUG: Register skipped: IsSummonPetSpell = false for spell %d.", spell_id);
+		}
+	}
+
+
+
 	// We need to handle PetType 5 (petHatelist), add the current target to the hatelist of the pet
 
 	if (record.petcontrol == petTargetLock)
@@ -408,26 +511,46 @@ bool ZoneDatabase::GetPoweredPetEntry(const std::string& pet_type, int16 pet_pow
 	return true;
 }
 
-Mob* Mob::GetPet() {
+Mob* Mob::GetPet()
+{
 	if (!GetPetID()) {
 		return nullptr;
 	}
 
 	const auto m = entity_list.GetMob(GetPetID());
 	if (!m) {
-		SetPetID(0);
+		// Kraqur: Multiclass Pet - do not auto-clear petid for secondary pets
+		if (!RuleB(Custom, MulticlassingEnabled)) {
+			SetPetID(0);
+		}
 		return nullptr;
 	}
 
 	if (m->GetOwnerID() != GetID()) {
-		SetPetID(0);
+		// Multiclass: do NOT auto-clear petid
+		if (!RuleB(Custom, MulticlassingEnabled)) {
+			SetPetID(0);
+		}
 		return nullptr;
 	}
 
 	return m;
 }
 
-bool Mob::HasPet() const {
+
+bool Mob::HasPet() const
+{
+	// Kraqur: Multiclass Pet - HasPet() means "has a UI pet", not "has any pet"
+	if (RuleB(Custom, MulticlassingEnabled)) {
+		if (GetPetID() == 0) {
+			return false;
+		}
+
+		const auto m = entity_list.GetMob(GetPetID());
+		return (m && m->GetOwnerID() == GetID());
+	}
+
+	// Legacy single-pet behavior
 	if (GetPetID() == 0) {
 		return false;
 	}
@@ -444,29 +567,50 @@ bool Mob::HasPet() const {
 	return true;
 }
 
-void Mob::SetPet(Mob* newpet) {
+
+void Mob::SetPet(Mob* newpet)
+{
+	// Kraqur: Multiclass Pet - SetPet() is invalid; ownership/UI handled elsewhere
+	if (RuleB(Custom, MulticlassingEnabled)) {
+		return;
+	}
+
+	// === Legacy single-pet behavior ===
+
 	Mob* oldpet = GetPet();
 	if (oldpet) {
 		oldpet->SetOwnerID(0);
 	}
+
 	if (newpet == nullptr) {
 		SetPetID(0);
-	} else {
+	}
+	else {
 		SetPetID(newpet->GetID());
+
 		Mob* oldowner = entity_list.GetMob(newpet->GetOwnerID());
-		if (oldowner)
+		if (oldowner) {
 			oldowner->SetPetID(0);
+		}
+
 		newpet->SetOwnerID(GetID());
 	}
 }
 
-void Mob::SetPetID(uint16 NewPetID) {
+
+void Mob::SetPetID(uint16 NewPetID)
+{
 	if (NewPetID == GetID() && NewPetID != 0)
 		return;
+
 	petid = NewPetID;
 
-	if(IsClient())
-	{
+	if (IsClient()) {
+		// Kraqur: Multiclass Pet - UI pet changes must be explicit; block implicit SetPetID
+		if (RuleB(Custom, MulticlassingEnabled)) {
+			return;
+		}
+
 		Mob* NewPet = entity_list.GetMob(NewPetID);
 		CastToClient()->UpdateXTargetType(MyPet, NewPet);
 	}

@@ -4566,6 +4566,53 @@ bool Mob::SpellOnTarget(
 		return false;
 	}
 
+	// Kraqur: Multiclass Pet - THJ-style beneficial buff fan-out to all owned pets with duplicate prevention
+	if (
+		IsBeneficialSpell(spell_id) &&
+		spelltar->IsPet() &&
+		spelltar->GetOwner() &&
+		spelltar->GetOwner()->IsClient() &&
+		this == spelltar->GetOwner() && // ONLY owner casting
+		!disable_buff_overwrite
+		) {
+
+		Client* owner = spelltar->GetOwner()->CastToClient();
+		if (owner) {
+			std::vector<Mob*> pets;
+			owner->GetAllPets(pets);
+
+			for (Mob* pet : pets) {
+				if (!pet || pet == spelltar) {
+					continue;
+				}
+
+				// Skip pets that already have the buff
+				bool has_buff = false;
+				for (int i = 0; i < pet->GetMaxTotalSlots(); ++i) {
+					if (pet->buffs[i].spellid == spell_id) {
+						has_buff = true;
+						break;
+					}
+				}
+
+				if (has_buff) {
+					continue;
+				}
+
+				SpellOnTarget(
+					spell_id,
+					pet,
+					reflect_effectiveness,
+					use_resist_adjust,
+					resist_adjust,
+					isproc,
+					level_override,
+					duration_override,
+					true
+				);
+			}
+		}
+	}
 	// cause the effects to the target
 	if (
 		!spelltar->SpellEffect(

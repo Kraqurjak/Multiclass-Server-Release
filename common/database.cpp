@@ -133,6 +133,18 @@ uint32 Database::CheckLogin(const char* name, const char* password, const char *
 	return id;
 }
 
+// Kraqur: Multiclass Pet - validate that a pettype string exists in the pets table
+bool Database::DoesPetTypeExist(const char* pettype)
+{
+	auto results = QueryDatabase(
+		StringFormat("SELECT 1 FROM pets WHERE pettype='%s' LIMIT 1", pettype)
+	);
+
+	return results.Success() && results.RowCount() > 0;
+}
+
+
+
 //Get Banned IP Address List - Only return false if the incoming connection's IP address is not present in the banned_ips table.
 bool Database::CheckBannedIPs(std::string login_ip)
 {

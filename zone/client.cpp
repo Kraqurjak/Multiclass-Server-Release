@@ -50,6 +50,8 @@ extern volatile bool RunLoops;
 #include "water_map.h"
 #include "bot_command.h"
 #include "string_ids.h"
+#include <sstream>
+#include <vector>
 
 #include "guild_mgr.h"
 #include "quest_parser_collection.h"
@@ -70,6 +72,94 @@ extern volatile bool RunLoops;
 #include "../common/events/player_events.h"
 #include "../common/events/player_event_logs.h"
 #include "dialogue_window.h"
+#include <unordered_map>
+#include <string>
+
+// Kraqur: Multiclass Pet - class-specific Syncrosatchel item IDs for pet inventory syncing
+namespace {
+
+	// Mage
+	static constexpr uint32 kMageSyncrosatchelID = 147495;
+	static constexpr uint32 kExpandedMageSyncrosatchelID = 147496;
+
+	// Bard
+	static constexpr uint32 kBardSyncrosatchelID = 147510;
+	static constexpr uint32 kExpandedBardSyncrosatchelID = 147511;
+
+	// Necromancer
+	static constexpr uint32 kNecroSyncrosatchelID = 147520;
+	static constexpr uint32 kExpandedNecroSyncrosatchelID = 147521;
+
+	// Druid
+	static constexpr uint32 kDruidSyncrosatchelID = 147530;
+	static constexpr uint32 kExpandedDruidSyncrosatchelID = 147531;
+
+	// Shadowknight
+	static constexpr uint32 kSKSyncrosatchelID = 147540;
+	static constexpr uint32 kExpandedSKSyncrosatchelID = 147541;
+
+	// Enchanter
+	static constexpr uint32 kEnchanterSyncrosatchelID = 147550;
+	static constexpr uint32 kExpandedEnchanterSyncrosatchelID = 147551;
+
+	// Beastlord
+	static constexpr uint32 kBeastlordSyncrosatchelID = 147560;
+	static constexpr uint32 kExpandedBeastlordSyncrosatchelID = 147561;
+
+	// Shaman
+	static constexpr uint32 kShamanSyncrosatchelID = 147570;
+	static constexpr uint32 kExpandedShamanSyncrosatchelID = 147571;
+
+	static const std::unordered_map<uint8, std::vector<uint32>> kSyncrosatchelByClass = {
+		{ Class::Magician,     { kMageSyncrosatchelID,     kExpandedMageSyncrosatchelID } },
+		{ Class::Bard,         { kBardSyncrosatchelID,     kExpandedBardSyncrosatchelID } },
+		{ Class::Necromancer,  { kNecroSyncrosatchelID,    kExpandedNecroSyncrosatchelID } },
+		{ Class::Druid,        { kDruidSyncrosatchelID,    kExpandedDruidSyncrosatchelID } },
+		{ Class::ShadowKnight, { kSKSyncrosatchelID,       kExpandedSKSyncrosatchelID } },
+		{ Class::Enchanter,    { kEnchanterSyncrosatchelID,kExpandedEnchanterSyncrosatchelID } },
+		{ Class::Beastlord,    { kBeastlordSyncrosatchelID,kExpandedBeastlordSyncrosatchelID } },
+		{ Class::Shaman,       { kShamanSyncrosatchelID,   kExpandedShamanSyncrosatchelID } }
+	};
+
+}
+
+
+
+// Kraqur: Multiclass Pet - map #petcmd class tokens (e.g. "nec", "mag") to class IDs
+// Multiclass Pet - #petcmd class token -> class id lookup
+static bool PetCmd_TokenToClass(const std::string& token, uint8& out_class)
+{
+	static const std::unordered_map<std::string, uint8> token_to_class = {
+		{ "war", Class::Warrior },
+		{ "clr", Class::Cleric },
+		{ "pal", Class::Paladin },
+		{ "rng", Class::Ranger },
+		{ "shd", Class::ShadowKnight },
+		{ "dru", Class::Druid },
+		{ "mnk", Class::Monk },
+		{ "brd", Class::Bard },
+		{ "rog", Class::Rogue },
+		{ "shm", Class::Shaman },
+		{ "nec", Class::Necromancer },
+		{ "wiz", Class::Wizard },
+		{ "mag", Class::Magician },
+		{ "enc", Class::Enchanter },
+		{ "bst", Class::Beastlord },
+		{ "ber", Class::Berserker }
+	};
+
+	std::string key = token;
+	std::transform(key.begin(), key.end(), key.begin(), ::tolower);
+
+	auto it = token_to_class.find(key);
+	if (it == token_to_class.end()) {
+		return false;
+	}
+
+	out_class = it->second;
+	return true;
+}
+
 
 
 extern QueryServ* QServ;
@@ -363,6 +453,8 @@ Client::Client(EQStreamInterface *ieqs) : Mob(
 	// gm
 	SetDisplayMobInfoWindow(true);
 	SetDevToolsEnabled(true);
+	// Kraqur: Multiclass Pet - initialize per-class pet ID slots
+	memset(m_class_pet_ids, 0, sizeof(m_class_pet_ids));
 
 	bot_owner_options[booDeathMarquee] = false;
 	bot_owner_options[booStatsUpdate] = false;
@@ -536,7 +628,7 @@ void Client::SendZoneInPackets()
 	safe_delete(outapp);
 
 	if (IsInAGuild()) {
-		guild_mgr.UpdateDbMemberOnline(CharacterID(), true); 
+		guild_mgr.UpdateDbMemberOnline(CharacterID(), true);
 		//SendGuildMembers();
 		SendGuildURL();
 		SendGuildChannel();
@@ -1132,7 +1224,179 @@ void Client::ChannelMessageReceived(uint8 chan_num, uint8 language, uint8 lang_s
 				Message(0, "Error: World server disconnected");
 		break;
 	}
+	// Kraqur: Multiclass Pet - full #petcmd parser and class-based pet selection
 	case ChatChannel_Say: { /* Say */
+		// Multiclass Pet Command
+		// #petcmd detection (Step 2: parse only)
+		if (message && message[0] == '#' && strncasecmp(message, "#petcmd", 7) == 0) {
+
+			std::vector<std::string> tokens;
+			{
+				std::stringstream ss(message);
+				std::string tok;
+				while (ss >> tok) {
+					tokens.push_back(tok);
+				}
+			}
+
+			LogInfo("PETCMD: received {} tokens", tokens.size());
+
+			// Step 3: parse selectors
+			std::vector<uint8> selector_classes;
+			bool select_all = false;
+
+			for (size_t i = 1; i < tokens.size(); ++i) {
+				std::string tok = tokens[i];
+
+				if (tok == "all") {
+					select_all = true;
+					continue;
+				}
+
+				uint8 cls = 0;
+				if (PetCmd_TokenToClass(tok, cls)) {
+					selector_classes.push_back(cls);
+				}
+			}
+
+			std::vector<Mob*> all_pets;
+			GetAllPets(all_pets);
+			LogInfo("PETCMD: GetAllPets returned {} pets", all_pets.size());
+
+			std::vector<Mob*> selected_pets;
+
+			for (Mob* pet : all_pets) {
+
+				if (!pet) {
+					continue;
+				}
+
+				if (select_all) {
+					selected_pets.push_back(pet);
+					continue;
+				}
+
+				uint8 pet_class = 0;
+
+				// Determine which class slot owns this pet
+				for (uint8 class_id = 0; class_id < Class::PLAYER_CLASS_COUNT; ++class_id) {
+					if (GetClassPetID(class_id) == pet->GetID()) {
+						pet_class = class_id;
+						break;
+					}
+				}
+
+				// Fallback: primary UI pet
+				if (!pet_class && GetPetID() == pet->GetID()) {
+					pet_class = GetClass();
+				}
+
+				if (!pet_class) {
+					continue;
+				}
+
+				for (uint8 cls : selector_classes) {
+					if (pet_class == cls) {
+						selected_pets.push_back(pet);
+						break;
+					}
+				}
+			}
+
+			LogInfo("PETCMD: selected {} pets", selected_pets.size());
+
+			std::string pet_command;
+
+			for (size_t i = 1; i < tokens.size(); ++i) {
+				const std::string& tok = tokens[i];
+
+				// Skip selectors
+				if (tok == "all") {
+					continue;
+				}
+
+				uint8 cls = 0;
+				if (PetCmd_TokenToClass(tok, cls)) {
+					continue;
+				}
+
+				// First non-selector token is the command
+				pet_command = tok;
+				break;
+			}
+
+			if (pet_command.empty()) {
+				LogInfo("PETCMD: no command specified");
+				break;
+			}
+
+			LogInfo("PETCMD: command [{}]", pet_command);
+
+			static const std::unordered_map<std::string, uint8> petcmd_map = {
+				{ "health",    PET_HEALTHREPORT },
+				{ "leader",    PET_LEADER },
+				{ "attack",    PET_ATTACK },
+				{ "qattack",   PET_QATTACK },
+				{ "follow",    PET_FOLLOWME },
+				{ "guard",     PET_GUARDHERE },
+				{ "sit",       PET_SIT },
+				{ "siton",     PET_SITDOWN },
+				{ "sitoff",    PET_STANDUP },
+				{ "taunt",     PET_TAUNT },
+				{ "taunton",   PET_TAUNT_ON },
+				{ "tauntoff",  PET_TAUNT_OFF },
+				{ "hold",      PET_HOLD },
+				{ "holdon",    PET_HOLD_ON },
+				{ "holdoff",   PET_HOLD_OFF },
+				{ "ghold",     PET_GHOLD },
+				{ "spellhold", PET_SPELLHOLD },
+				{ "focus",     PET_FOCUS },
+				{ "feign",     PET_FEIGN },
+				{ "backoff",   PET_BACKOFF },
+				{ "getlost",   PET_GETLOST },
+				{ "regroup",   PET_REGROUP }
+			};
+
+			uint8 pet_command_id = PET_MAXCOMMANDS;
+
+			auto it = petcmd_map.find(pet_command);
+			if (it == petcmd_map.end()) {
+				LogInfo("PETCMD: unknown command [{}]", pet_command);
+				break;
+			}
+
+			pet_command_id = it->second;
+
+			LogInfo("PETCMD: resolved command id [{}]", pet_command_id);
+
+			Mob* target = GetTarget();
+
+			for (Mob* pet : selected_pets) {
+
+				if (!pet) {
+					continue;
+				}
+
+				LogInfo(
+					"PETCMD: executing command [{}] for pet [{}] id [{}]",
+					pet_command_id,
+					pet->GetName(),
+					pet->GetID()
+				);
+
+				ExecutePetCommand(pet, pet_command_id, target);
+			}
+
+
+
+
+
+			// Stop normal say / command handling
+			break;
+		}
+	
+
+
 		if (player_event_logs.IsEventEnabled(PlayerEvent::SAY)) {
 			std::string msg = message;
 			if (!msg.empty() && msg.at(0) != '#' && msg.at(0) != '^') {
@@ -12482,4 +12746,811 @@ void Client::SaveBucket(const std::string& bucket_name, const std::string& bucke
 	auto results = database.QueryDatabase(query);
 }
 
+// Kraqur: Multiclass Pet - per-class pet ownership tracking
+bool Client::HasClassPet(uint8 class_id) const
+{
+	if (class_id < Class::Warrior || class_id > Class::Berserker) {
+		return false;
+	}
 
+	// Respect multiclass bits
+	if (RuleB(Custom, MulticlassingEnabled)) {
+		uint32 classes_bits = GetClassesBits();
+		uint16 class_bit = GetPlayerClassBit(class_id);
+
+		if (!(classes_bits & class_bit)) {
+			return false; // you don't have this class at all
+		}
+	}
+
+	return m_class_pet_ids[class_id] != 0;
+}
+
+// Kraqur: Multiclass Pet - per-class pet ownership tracking
+uint16 Client::GetClassPetID(uint8 class_id) const
+{
+	if (class_id < Class::Warrior || class_id > Class::Berserker) {
+		return 0;
+	}
+
+	if (RuleB(Custom, MulticlassingEnabled)) {
+		uint32 classes_bits = GetClassesBits();
+		uint16 class_bit = GetPlayerClassBit(class_id);
+
+		if (!(classes_bits & class_bit)) {
+			return 0;
+		}
+	}
+
+	return m_class_pet_ids[class_id];
+}
+
+// Kraqur: Multiclass Pet - per-class pet ownership tracking
+void Client::SetClassPetID(uint8 class_id, uint16 pet_id)
+{
+	if (class_id < Class::Warrior || class_id > Class::Berserker) {
+		return;
+	}
+
+	if (RuleB(Custom, MulticlassingEnabled)) {
+		uint32 classes_bits = GetClassesBits();
+		uint16 class_bit = GetPlayerClassBit(class_id);
+
+		if (!(classes_bits & class_bit)) {
+			return; // cannot assign a pet to a class the player doesn't have
+		}
+	}
+
+	m_class_pet_ids[class_id] = pet_id;
+}
+
+// Kraqur: Multiclass Pet - per-class pet ownership tracking
+void Client::ClearClassPet(uint8 class_id, uint16 pet_id)
+{
+	if (class_id < Class::Warrior || class_id > Class::Berserker) {
+		return;
+	}
+
+	if (pet_id == 0 || m_class_pet_ids[class_id] == pet_id) {
+		m_class_pet_ids[class_id] = 0;
+	}
+}
+
+/*void Client::ClearAllClassPets()
+{
+	for (uint8 c = Class::Warrior; c <= Class::Berserker; ++c) {
+		m_class_pet_ids[c] = 0;
+	}
+}
+*/
+
+// Kraqur: Multiclass Pet - return primary pet plus all class pets
+void Client::GetAllPets(std::vector<Mob*>& pets)
+{
+	pets.clear();
+
+	// Primary pet
+	if (GetPetID()) {
+		if (Mob* p = entity_list.GetMob(static_cast<uint16>(GetPetID()))) {
+			pets.push_back(p);
+		}
+	}
+
+	// Class pets
+	for (uint8 class_id = 0; class_id < Class::PLAYER_CLASS_COUNT; ++class_id) {
+		uint16 pet_id = m_class_pet_ids[class_id];
+
+		if (pet_id && pet_id != GetPetID()) {
+			if (Mob* p = entity_list.GetMob(static_cast<uint16>(pet_id))) {
+				pets.push_back(p);
+			}
+		}
+	}
+}
+
+// Kraqur: Multiclass Pet - determine which class a pet spell belongs to
+uint8 Client::GetSpellClass(uint16 spell_id) const
+{
+	if (!IsValidSpell(spell_id))
+		return Class::None;
+
+	const SPDat_Spell_Struct* spell = &spells[spell_id];
+
+	// Explicit pet spell class mapping
+	for (int i = 0; i < EFFECT_COUNT; ++i)
+	{
+		switch (spell->effect_id[i])
+		{
+		case SE_NecPet:        // 71
+			return Class::Necromancer;
+
+		case SE_SummonBSTPet:  // 106
+			return Class::Beastlord;
+
+		case SE_SummonPet:     // 57 (mage, cleric hammer, shaman, etc.)
+			return Class::Magician;
+
+		case SE_SummonHorse:   // 113
+			return Class::Paladin; // or NONE if you prefer
+		}
+	}
+
+	// Fallback: use class level table
+	uint8 best_class = Class::None;
+	uint8 best_level = 255;
+
+	for (uint8 c = Class::Warrior; c <= Class::Berserker; ++c)
+	{
+		uint8 idx = c - 1;
+		if (idx >= Class::PLAYER_CLASS_COUNT)
+			continue;
+
+		uint8 level = spell->classes[idx];
+		if (level > 0 && level < best_level)
+		{
+			best_level = level;
+			best_class = c;
+		}
+	}
+
+	return best_class;
+}
+
+// Kraqur: Multiclass Pet - expanded pet spell detection (summon + charm)
+bool Client::IsPetSpell(uint16 spell_id) const
+{
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	const SPDat_Spell_Struct* spell = &spells[spell_id];
+
+	for (int i = 0; i < EFFECT_COUNT; ++i) {
+		int effect = spell->effect_id[i];
+
+		switch (effect) {
+
+			// Summoned pets
+		case SE_SummonPet:       // exists
+		case SE_SummonBSTPet:    // exists
+		case SE_SummonHorse:     // exists
+			return true;
+
+			// Charm pets (use numeric IDs because enums are missing)
+		case 22: // Charm
+		case 23: // Charm Undead
+		case 24: // Charm Animal
+			return true;
+
+		default:
+			break;
+		}
+	}
+
+	return false;
+}
+
+// Kraqur: Multiclass Pet - delegate to global expanded pet-summon classifier
+bool Client::IsSummonPetSpell(uint16 spell_id) const
+{
+	return ::IsSummonPetSpell(spell_id);
+}
+
+/*bool Client::IsCharmPetSpell(uint16 spell_id) const
+{
+	if (!IsValidSpell(spell_id)) {
+		return false;
+	}
+
+	const SPDat_Spell_Struct* spell = &spells[spell_id];
+
+	for (int i = 0; i < EFFECT_COUNT; ++i) {
+		int effect = spell->effect_id[i];
+
+		switch (effect) {
+		case 22: // Charm
+		case 23: // Charm Undead
+		case 24: // Charm Animal
+			return true;
+		}
+	}
+
+	return false;
+}*/
+
+/*void Client::AddPetToOwner(Mob* pet)
+{
+	if (!pet)
+		return;
+
+	// Assign ownership
+	pet->SetOwnerID(GetID());
+
+	// Mark as client-owned pet so AI treats it as a real pet
+	pet->SetPetOwnerClient(true);
+	pet->SetPetOwnerNPC(false);
+
+	// Extra pets must have a valid pet type for AI
+	pet->SetPetType(petOther);
+
+	// DO NOT call SetPetID
+	// DO NOT touch UI
+	// DO NOT touch XTarget
+}*/
+
+// Kraqur: Multiclass Pet - authoritative UI-pet setter; updates the client pet window without invoking legacy SetPetID logic
+void Client::SetUIPetID(uint16 new_pet_id)
+{
+	if (!RuleB(Custom, MulticlassingEnabled)) {
+		SetPetID(new_pet_id);
+		return;
+	}
+
+	// Force the UI pet to the selected pet (intentional user action)
+	petid = new_pet_id;
+
+	// This is the ONLY place we should drive the pet window in multiclass mode
+	Mob* p = entity_list.GetMob(new_pet_id);
+	UpdateXTargetType(MyPet, p);
+}
+
+// Kraqur: Multiclass Pet - remove a pet from its class slot when it despawns
+void Client::ClearClassPetByPetID(uint16 pet_id)
+{
+	if (!pet_id) {
+		return;
+	}
+
+	for (uint8 c = Class::Warrior; c <= Class::Berserker; ++c) {
+		if (m_class_pet_ids[c] == pet_id) {
+			m_class_pet_ids[c] = 0;
+			return;
+		}
+	}
+}
+
+// Kraqur: Multiclass Pet - locate the best Syncrosatchel bag for a given class
+const EQ::ItemInstance* Client::FindSyncrosatchelForClass(uint8 class_id) const
+{
+	if (class_id == 0) {
+		return nullptr;
+	}
+
+	auto it = kSyncrosatchelByClass.find(class_id);
+	if (it == kSyncrosatchelByClass.end()) {
+		return nullptr;
+	}
+
+	const EQ::ItemInstance* best_bag = nullptr;
+	uint8 best_slots = 0;
+
+	auto check_inst = [&](const EQ::ItemInstance* inst) {
+		if (!inst) {
+			return;
+		}
+
+		const EQ::ItemData* item = inst->GetItem();
+		if (!item) {
+			return;
+		}
+
+		for (uint32 bag_id : it->second) {
+			if (item->ID == bag_id && item->BagSlots > best_slots) {
+				best_slots = item->BagSlots;
+				best_bag = inst;
+			}
+		}
+		};
+
+	// Scan inventory + bags
+	for (int slot = EQ::invslot::GENERAL_BEGIN; slot <= EQ::invslot::GENERAL_END; ++slot) {
+		const EQ::ItemInstance* inst = GetInv().GetItem(slot);
+		check_inst(inst);
+
+		if (inst && inst->IsType(EQ::item::ItemClassBag)) {
+			for (uint8 i = 0; i < inst->GetItem()->BagSlots; ++i) {
+				check_inst(inst->GetItem(i));
+			}
+		}
+	}
+
+	// Scan bank + bags
+	for (int slot = EQ::invslot::BANK_BEGIN; slot <= EQ::invslot::BANK_END; ++slot) {
+		const EQ::ItemInstance* inst = GetInv().GetItem(slot);
+		check_inst(inst);
+
+		if (inst && inst->IsType(EQ::item::ItemClassBag)) {
+			for (uint8 i = 0; i < inst->GetItem()->BagSlots; ++i) {
+				check_inst(inst->GetItem(i));
+			}
+		}
+	}
+
+	return best_bag;
+}
+
+
+
+
+// Kraqur: Multiclass Pet - apply Syncrosatchel items to a newly summoned pet
+// Multiclass Pet Bags For Pets
+void Client::SyncPetFromSyncrosatchel(Pet* pet, uint8 pet_class)
+{
+	if (!pet) {
+		return;
+	}
+
+	// Mark this pet as Syncrosatchel controlled (NON PERSISTENT)
+	if (!pet->EntityVariableExists("syncrosatchel_pet")) {
+		pet->SetEntityVariable("syncrosatchel_pet", "1");
+	}
+
+	if (pet_class == 0) {
+		return;
+	}
+
+	const EQ::ItemInstance* bag = FindSyncrosatchelForClass(pet_class);
+	if (!bag) {
+		return;
+	}
+
+	const EQ::ItemData* bag_item = bag->GetItem();
+	if (!bag_item) {
+		return;
+	}
+
+	const uint8 slots = bag_item->BagSlots;
+	if (slots == 0) {
+		return;
+	}
+
+	for (uint8 slot = 0; slot < slots; ++slot) {
+		const EQ::ItemInstance* inst = bag->GetItem(slot);
+		if (!inst) {
+			continue;
+		}
+
+		const EQ::ItemData* item = inst->GetItem();
+		if (!item) {
+			continue;
+		}
+
+		pet->AddLootDrop(
+			item,
+			LootdropEntriesRepository::NewNpcEntity(),
+			true
+		);
+	}
+}
+
+// Kraqur: Multiclass Pet - unified pet command executor for all owned pets
+// PET_ATTACK - Full attack command; validates target, range, mez, fear, legality, then adds hate.
+// PET_QATTACK - Quick attack; minimal hate, skips some checks but still respects mez / fear / legality.
+// PET_BACKOFF - Stop attacking; wipe hate list and clear target.
+// PET_HEALTHREPORT - Report HP % and show active buffs to the owner.
+// PET_GETLOST - Dismiss pet; clears class - pet slot and depops(blocked for charmed pets).
+// PET_GUARDHERE - Pet guards current location; saves guard spot and stops navigation.
+// PET_FOLLOWME - Pet follows owner; clears feign and sets follow order.
+// PET_TAUNT - Toggle taunt on / off depending on current state.
+// PET_TAUNT_ON - Force taunt ON.
+// PET_TAUNT_OFF - Force taunt OFF.
+// PET_HOLD - Toggle hold; prevents pet from auto - engaging.
+// PET_HOLD_ON - Force hold ON.
+// PET_HOLD_OFF - Force hold OFF.
+// PET_GHOLD - Toggle group - hold; overrides normal hold.
+// PET_SPELLHOLD - Toggle spellcasting on / off.
+// PET_FOCUS - Toggle focus mode(pet prioritizes owner's target).
+// PET_FEIGN - Toggle feign death; drop hate and lie down or stand back up.
+// PET_REGROUP - Toggle regroup mode; pet stops and waits for owner to reposition.
+void Client::ExecutePetCommand(Mob* pet, uint32 command, Mob* target)
+{
+	if (!pet) {
+		return;
+	}
+
+	switch (command) {
+
+	case PET_ATTACK: {
+		if (!target) {
+			return;
+		}
+
+		if (target->IsMezzed()) {
+			MessageString(Chat::NPCQuestSay, CANNOT_WAKE, pet->GetCleanName(), target->GetCleanName());
+			return;
+		}
+
+		if (pet->IsFeared()) {
+			return;
+		}
+
+		if (!pet->IsAttackAllowed(target)) {
+			pet->SayString(this, NOT_LEGAL_TARGET);
+			return;
+		}
+
+		if (DistanceSquared(pet->GetPosition(), target->GetPosition()) >= RuleR(Aggro, PetAttackRange)) {
+			return;
+		}
+
+		pet->SetFeigned(false);
+		pet->SetAppearance(eaStanding);
+
+		zone->AddAggroMob();
+
+		int hate = 1;
+		if (pet->IsEngaged()) {
+			auto top = pet->GetHateMost();
+			if (top && top != target) {
+				hate += pet->GetHateAmount(top) - pet->GetHateAmount(target) + 100;
+			}
+		}
+
+		pet->AddToHateList(target, hate, 0, true, false, false, SPELL_UNKNOWN, true);
+		MessageString(Chat::PetResponse, PET_ATTACKING, pet->GetCleanName(), target->GetCleanName());
+		break;
+	}
+
+	case PET_QATTACK: {
+		if (pet->IsFeared() || !target) {
+			return;
+		}
+
+		if (target->IsMezzed()) {
+			MessageString(Chat::NPCQuestSay, CANNOT_WAKE, pet->GetCleanName(), target->GetCleanName());
+			return;
+		}
+
+		if (!pet->IsAttackAllowed(target)) {
+			pet->SayString(this, NOT_LEGAL_TARGET);
+			return;
+		}
+
+		pet->SetFeigned(false);
+		pet->SetAppearance(eaStanding);
+		zone->AddAggroMob();
+		pet->AddToHateList(target, 1, 0, true, false, false, SPELL_UNKNOWN, true);
+		MessageString(Chat::PetResponse, PET_ATTACKING, pet->GetCleanName(), target->GetCleanName());
+		break;
+	}
+
+	case PET_BACKOFF: {
+		if (pet->IsFeared()) {
+			return;
+		}
+
+		pet->SayString(this, Chat::PetResponse, PET_CALMING);
+		pet->WipeHateList();
+		pet->SetTarget(nullptr);
+		break;
+	}
+
+	case PET_HEALTHREPORT: {
+		char val1[64] = { 0 };
+
+		MessageString(
+			Chat::PetResponse,
+			PET_REPORT_HP,
+			ConvertArrayF(pet->GetHPRatio(), val1)
+		);
+
+		pet->ShowBuffs(this);
+		break;
+	}
+
+	case PET_GETLOST: {
+		if (pet->Charmed()) {
+			return;
+		}
+
+		uint16 pet_id = pet->GetID();
+
+		ClearClassPetByPetID(pet_id);
+
+		pet->SayString(this, Chat::PetResponse, PET_GETLOST_STRING);
+		pet->CastToNPC()->Depop();
+		break;
+	}
+
+
+	case PET_GUARDHERE: {
+		if (pet->IsFeared()) {
+			return;
+		}
+
+		pet->SetFeigned(false);
+		pet->SayString(this, Chat::PetResponse, PET_GUARDINGLIFE);
+		pet->SetPetOrder(SPO_Guard);
+		pet->CastToNPC()->SaveGuardSpot(pet->GetPosition());
+		pet->StopNavigation();
+		break;
+	}
+
+	case PET_FOLLOWME: {
+		if (pet->IsFeared()) {
+			return;
+		}
+
+		pet->SetFeigned(false);
+		pet->SayString(this, Chat::PetResponse, PET_FOLLOWING);
+		pet->SetPetOrder(SPO_Follow);
+		break;
+	}
+
+	case PET_TAUNT: {
+		if (pet->CastToNPC()->IsTaunting()) {
+			MessageString(Chat::PetResponse, PET_NO_TAUNT);
+			pet->CastToNPC()->SetTaunting(false);
+		}
+		else {
+			MessageString(Chat::PetResponse, PET_DO_TAUNT);
+			pet->CastToNPC()->SetTaunting(true);
+		}
+		break;
+	}
+
+	case PET_TAUNT_ON: {
+		MessageString(Chat::PetResponse, PET_DO_TAUNT);
+		pet->CastToNPC()->SetTaunting(true);
+		break;
+	}
+
+	case PET_TAUNT_OFF: {
+		MessageString(Chat::PetResponse, PET_NO_TAUNT);
+		pet->CastToNPC()->SetTaunting(false);
+		break;
+	}
+
+	case PET_HOLD: {
+		bool held = !pet->IsHeld();
+		pet->SetHeld(held);
+		pet->SetGHeld(false);
+
+		MessageString(
+			Chat::PetResponse,
+			held ? PET_HOLD_SET_ON : PET_HOLD_SET_OFF
+		);
+		break;
+	}
+
+	case PET_HOLD_ON: {
+		if (!pet->IsHeld()) {
+			pet->SetHeld(true);
+			pet->SetGHeld(false);
+
+			MessageString(Chat::PetResponse, PET_HOLD_SET_ON);
+		}
+		break;
+	}
+
+	case PET_HOLD_OFF: {
+		if (pet->IsHeld()) {
+			pet->SetHeld(false);
+
+			MessageString(Chat::PetResponse, PET_HOLD_SET_OFF);
+		}
+		break;
+	}
+
+	case PET_GHOLD: {
+		bool gheld = !pet->IsGHeld();
+		pet->SetGHeld(gheld);
+		pet->SetHeld(false);
+
+		MessageString(
+			Chat::PetResponse,
+			gheld ? PET_ON_GHOLD : PET_OFF_GHOLD
+		);
+		break;
+	}
+
+	case PET_SPELLHOLD: {
+		bool nocast = !pet->IsNoCast();
+		pet->SetNoCast(nocast);
+
+		MessageString(
+			Chat::PetResponse,
+			nocast ? PET_NOT_CASTING : PET_CASTING
+		);
+		break;
+	}
+
+	case PET_FOCUS: {
+		bool focused = !pet->IsFocused();
+		pet->SetFocused(focused);
+
+		MessageString(
+			Chat::PetResponse,
+			focused ? PET_NOW_FOCUSING : PET_NOT_FOCUSING
+		);
+		break;
+	}
+
+
+	case PET_FEIGN: {
+		if (pet->IsFeared()) {
+			return;
+		}
+
+		if (pet->GetPetOrder() == SPO_FeignDeath) {
+			// Un-feign (stand up)
+			pet->SetFeigned(false);
+			pet->SetPetOrder(SPO_Follow);
+			pet->SendAppearancePacket(AppearanceType::Animation, Animation::Standing);
+
+			pet->SayString(this, Chat::PetResponse, PET_SIT_STRING);
+		}
+		else {
+			// Feign (drop)
+			pet->WipeHateList();
+			pet->SetPetOrder(SPO_FeignDeath);
+			pet->SetRunAnimSpeed(0);
+			pet->StopNavigation();
+			pet->SendAppearancePacket(AppearanceType::Animation, Animation::Lying);
+			pet->SetFeigned(true);
+			pet->SetTarget(nullptr);
+
+			pet->SayString(this, Chat::PetResponse, PET_SIT_STRING);
+		}
+
+		break;
+	}
+
+	case PET_REGROUP: {
+		pet->SetPetRegroup(!pet->IsPetRegroup());
+		pet->SetTarget(nullptr);
+
+		if (pet->IsPetRegroup()) {
+			pet->SayString(this, Chat::PetResponse, PET_ON_REGROUPING);
+		}
+		else {
+			pet->SayString(this, Chat::PetResponse, PET_OFF_REGROUPING);
+		}
+		break;
+	}
+
+
+	default:
+		break;
+	}
+}
+
+// Kraqur: Multiclass Pet - spawn all non-primary pets on login
+void Client::SpawnSecondaryPets()
+{
+	for (const auto& info : m_secondary_pet_infos) {
+		if (!info.SpellID) {
+			continue;
+		}
+
+		const char* pettype = spells[info.SpellID].teleport_zone;
+		MakePet(info.SpellID, pettype, info.Name);
+	}
+}
+
+// Kraqur: Multiclass Pet - restore persistent pet buffs for all owned pets
+void Client::SyncAllPetBuffsFromDB()
+{
+	// Find any owned pet so we know max slots and have something to apply to
+	Mob* any_pet = nullptr;
+	for (auto& it : entity_list.GetMobList()) {
+		Mob* mob = it.second;
+		if (!mob) {
+			continue;
+		}
+
+		if (mob->GetOwner() == this) {
+			any_pet = mob;
+			break;
+		}
+	}
+
+	if (!any_pet) {
+		return;
+	}
+
+	const int max_slots = any_pet->GetMaxBuffSlots();
+	if (max_slots <= 0) {
+		return;
+	}
+
+	// Load persisted pet buffs from DB (authoritative: pet = 0)
+	std::vector<Buffs_Struct> persisted;
+	persisted.resize(max_slots);
+
+	// Ensure clean slate for slots not present in DB
+	for (int i = 0; i < max_slots; ++i) {
+		persisted[i].spellid = 0;
+	}
+
+	const std::string query = StringFormat(
+		"SELECT slot, spell_id, caster_level, castername, ticsremaining, counters, numhits, rune, instrument_mod "
+		"FROM character_pet_buffs "
+		"WHERE char_id = %u AND pet = 0 "
+		"ORDER BY slot",
+		CharacterID()
+	);
+
+	auto results = database.QueryDatabase(query);
+	if (!results.Success()) {
+		return;
+	}
+
+	for (auto row = results.begin(); row != results.end(); ++row) {
+		const int slot = atoi(row[0]);
+		if (slot < 0 || slot >= max_slots) {
+			continue;
+		}
+
+		Buffs_Struct& b = persisted[slot];
+
+		b.spellid = static_cast<uint16>(atoi(row[1]));
+		b.casterlevel = static_cast<uint8>(atoi(row[2]));
+
+		strn0cpy(b.caster_name, row[3] ? row[3] : "", sizeof(b.caster_name));
+
+		b.ticsremaining = atoi(row[4]);
+		b.counters = atoi(row[5]);
+
+		// Correct THJ mappings
+		b.hit_number = atoi(row[6]);     // numhits
+		b.melee_rune = atoi(row[7]);     // rune
+		b.instrument_mod = atoi(row[8]);
+
+		b.UpdateClient = true;
+	}
+
+
+	// Apply persisted buff state onto ALL owned pets
+	for (auto& it : entity_list.GetMobList()) {
+		Mob* pet = it.second;
+		if (!pet) {
+			continue;
+		}
+
+		if (pet->GetOwner() != this) {
+			continue;
+		}
+
+		Buffs_Struct* dst = pet->GetBuffs();
+		if (!dst) {
+			continue;
+		}
+
+		const int dst_max = pet->GetMaxBuffSlots();
+		const int n = (dst_max < max_slots) ? dst_max : max_slots;
+
+		for (int i = 0; i < n; ++i) {
+			dst[i] = persisted[i];
+			dst[i].UpdateClient = true;
+		}
+	}
+}
+
+// Kraqur: Multiclass Pet - check if client owns any pet (primary or class)
+bool Client::HasAnyPet() const
+{
+	for (auto& it : entity_list.GetMobList()) {
+		Mob* m = it.second;
+		if (!m) {
+			continue;
+		}
+
+		if (m->GetOwnerID() == GetID()) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+// Kraqur: Multiclass Pet - explicitly set the UI-selected pet without altering server-side pet ownership logic
+void Client::SetPetUIID(uint16 new_pet_id)
+{
+	// Set server-side petid
+	petid = new_pet_id;
+
+	// Explicitly update client UI even in multiclass mode
+	Mob* pet = entity_list.GetMob(new_pet_id);
+	UpdateXTargetType(MyPet, pet);
+}

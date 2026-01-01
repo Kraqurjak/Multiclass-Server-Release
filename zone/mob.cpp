@@ -1233,7 +1233,23 @@ void Mob::FillSpawnStruct(NewSpawn_Struct* ns, Mob* ForWho)
 	ns->spawn.IsMercenary = IsMerc() ? 1 : 0;
 	ns->spawn.targetable_with_hotkey = no_target_hotkey ? 0 : 1; // opposite logic!
 
-	ns->spawn.petOwnerId	= ownerid;
+	// Kraqur: Multiclass Pet - only primary pet advertises petOwnerId; secondary pets keep server-side owner only
+	if (ownerid) {
+		Mob* owner = entity_list.GetMob(ownerid);
+		bool is_primary_pet = (owner && owner->GetPetID() == GetID());
+
+		if (is_primary_pet) {
+			ns->spawn.petOwnerId = ownerid;
+		}
+		else {
+			ns->spawn.petOwnerId = 0;
+		}
+	}
+	else {
+		ns->spawn.petOwnerId = 0;
+	}
+
+
 
 	ns->spawn.haircolor = haircolor;
 	ns->spawn.beardcolor = beardcolor;
@@ -4393,32 +4409,61 @@ Mob* Mob::GetOwnerOrSelf()
 		return this;
 	}
 
+	// Primary pet: client has this as their UI pet
 	if (m->GetPetID() == GetID()) {
 		return m;
 	}
 
-	if (IsNPC() && CastToNPC()->GetSwarmInfo()){
+	// Swarm fallback
+	if (IsNPC() && CastToNPC()->GetSwarmInfo()) {
 		return CastToNPC()->GetSwarmInfo()->GetOwner();
 	}
 
+	// Kraqur: Multiclass Pet - preserve owner for non-primary pets instead of clearing ownerid
+	if (RuleB(Custom, MulticlassingEnabled) && m->IsClient()) {
+		// Do NOT clear ownerid for extra pets
+		return m;
+	}
+
+	// Non-multiclass: enforce legacy behavior
 	SetOwnerID(0);
 	return this;
 }
 
-Mob* Mob::GetOwner() {
+
+Mob* Mob::GetOwner()
+{
 	Mob* m = entity_list.GetMob(GetOwnerID());
 
-	if (m && m->GetPetID() == GetID()) {
+	if (!m) {
+		SetOwnerID(0);
+		return nullptr;
+	}
+
+	// Primary pet: UI pet matches this mob
+	if (m->GetPetID() == GetID()) {
 		return m;
 	}
 
-	if(IsNPC() && CastToNPC()->GetSwarmInfo()){
+	// Swarm pet: use swarm owner
+	if (IsNPC() && CastToNPC()->GetSwarmInfo()) {
 		return CastToNPC()->GetSwarmInfo()->GetOwner();
 	}
 
+	// Kraqur: Multiclass Pet - allow secondary pets to retain client owner even if not UI pet
+	if (RuleB(Custom, MulticlassingEnabled) && m->IsClient()) {
+		// Keep ownerid as-is
+		return m;
+	}
+
+	// Legacy behavior: invalid owner, clear
 	SetOwnerID(0);
-	return 0;
+	return nullptr;
 }
+
+
+
+
 
 Mob* Mob::GetUltimateOwner()
 {
@@ -4442,14 +4487,18 @@ void Mob::SetOwnerID(uint16 new_owner_id) {
 
 	ownerid = new_owner_id;
 
-	// if we're setting the owner ID to 0 and they're not either charmed or not-a-pet then
-	// they're a normal pet and should be despawned
+	// Legacy: clearing owner on normal pet despawns it
 	if (
 		!ownerid &&
 		IsNPC() &&
 		GetPetType() != petCharmed &&
 		GetPetType() != petNone
-	) {
+		) {
+		// Kraqur: Multiclass Pet - prevent legacy auto-depop when ownerid clears; secondary pets must persist
+		if (RuleB(Custom, MulticlassingEnabled)) {
+			return;
+		}
+
 		Depop();
 	}
 }
