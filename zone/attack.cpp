@@ -1710,6 +1710,45 @@ void Client::Damage(Mob* other, int64 damage, uint16 spell_id, EQ::skills::Skill
 	//do a majority of the work...
 	CommonDamage(other, damage, spell_id, attack_skill, avoidable, buffslot, iBuffTic, special);
 
+	// Kraqur: MULTICLASS PET ASSIST
+	// When MulticlassingEnabled is true, all secondary pets owned by the client
+	// automatically assist when the client takes damage.
+	// - Skips primary pet (already assists normally)
+	// - Skips dead pets
+	// - Skips non-owned pets
+	// - Adds attacker to hate list and sets target
+	if (RuleB(Custom, MulticlassingEnabled) && other && damage > 0) {
+
+		auto& mob_list = entity_list.GetMobList();
+		for (auto it = mob_list.begin(); it != mob_list.end(); ++it) {
+
+			Mob* pet = it->second;
+			if (!pet) {
+				continue;
+			}
+
+			// Must be a pet owned by this client
+			if (!pet->IsPet() || pet->GetOwnerID() != GetID()) {
+				continue;
+			}
+
+			// Skip primary pet (it already assists normally)
+			if (GetPetID() == pet->GetID()) {
+				continue;
+			}
+
+			// Skip dead pets
+			if (pet->GetHP() <= 0) {
+				continue;
+			}
+
+			// Engage attacker
+			pet->AddToHateList(other, 1);
+			pet->SetTarget(other);
+		}
+	}
+
+
 	if (damage > 0) {
 
 		if (!IsValidSpell(spell_id)) {
@@ -1794,16 +1833,24 @@ bool Client::Death(Mob* killer_mob, int64 damage, uint16 spell, EQ::skills::Skil
 
 	InterruptSpell();
 
+	// Kraqur: Persistent Pet Handling
+	// - Do NOT depop pets on death
+	// - Do NOT detach ownership
+	// - Do NOT clear SetPet(0) beyond the local pointer
+	// - Charmed pets break charm on owner death
+	// - Mercenaries still suspend normally
 	Mob* m_pet = GetPet();
-	SetPet(0);
+
 	SetHorseId(0);
 	ShieldAbilityClearVariables();
 	dead = true;
 
+	// If the pet was charmed, break charm (required)
 	if (m_pet && m_pet->IsCharmed()) {
 		m_pet->BuffFadeByEffect(SE_Charm);
 	}
 
+	// Mercs still suspend normally
 	if (GetMerc()) {
 		GetMerc()->Suspend();
 	}
@@ -2448,6 +2495,43 @@ bool NPC::Death(Mob* killer_mob, int64 damage, uint16 spell, EQ::skills::SkillTy
 	SetHP(0);
 	SetPet(0);
 
+	SetHP(0);
+	SetPet(0);
+
+	// Kraqur: Multiclass Pet Enforcement:
+	// When a summoned pet dies, clear the owner's class-specific pet slot.
+	// Uses GetSpellClass(pet_spell_id) to determine which slot to clear.
+	// Applies only to:
+	//   - Summoned pets
+	//   - Owned by a client
+	//   - Not charmed
+	// Logs the cleanup for debugging.
+	if (IsPet() && GetOwner() && !IsCharmed()) {
+		Mob* owner = GetOwner();
+
+		if (owner->IsClient()) {
+			uint16 pet_spell_id = GetPetSpellID();
+			uint8 spell_class = owner->CastToClient()->GetSpellClass(pet_spell_id);
+
+			owner->CastToClient()->ClearClassPet(spell_class);
+
+			Log(Logs::General, Logs::Spells,
+				"Multiclass Enforcement: Summoned pet %d died, clearing class pet slot %d for [%s]",
+				GetID(), spell_class, owner->GetName()
+			);
+		}
+	}
+
+	if (GetSwarmOwner()) {
+		Mob* owner = entity_list.GetMobID(GetSwarmOwner());
+		if (owner) {
+			owner->SetTempPetCount(owner->GetTempPetCount() - 1);
+		}
+	}
+
+	// Kraqur: Swarm Pet Cleanup
+	// Decrement owner's temporary pet count when a swarm pet dies.
+	// Ensures correct swarm lifecycle tracking.
 	if (GetSwarmOwner()) {
 		Mob* owner = entity_list.GetMobID(GetSwarmOwner());
 		if (owner) {
@@ -2500,9 +2584,38 @@ bool NPC::Death(Mob* killer_mob, int64 damage, uint16 spell, EQ::skills::SkillTy
 	entity_list.QueueClients(killer_mob, app, false);
 
 	safe_delete(app);
+	
+	// Kraqur: Instance Respawn Rules
+	// - StaticInstanceMode (non-respawning) -> skip respawn entirely
+	// - FarmingInstanceMode (respawning) -> always reset respawn timer
+	// - All other zones -> default respawn behavior
+	// Controlled by:
+	//   StaticInstanceVersion
+	//   FarmingInstanceVersion
+	//   StaticInstanceMode
+	//   FarmingInstanceMode
 
-	if (respawn2) {
-		respawn2->DeathReset(1);
+	// Disable respawns in non-respawning instances
+	if (zone) {
+		const int static_ver = RuleI(Custom, StaticInstanceVersion);   // 101
+		const int farming_ver = RuleI(Custom, FarmingInstanceVersion);  // 100
+
+		const bool static_on = RuleB(Custom, StaticInstanceMode);
+		const bool farming_on = RuleB(Custom, FarmingInstanceMode);
+
+		const int cur_ver = zone->GetInstanceVersion();
+
+		// Static expedition (non-respawning) - skip respawn
+		if (cur_ver == static_ver && static_on) {
+			// no respawn
+		}
+		// Farming expedition (respawning) - always reset respawn
+		else if (cur_ver == farming_ver && farming_on) {
+			if (respawn2) {
+				respawn2->DeathReset(1);
+			}
+		}
+		// All other instances/zones - untouched
 	}
 
 	if (killer_mob && GetClass() != Class::LDoNTreasure) {
