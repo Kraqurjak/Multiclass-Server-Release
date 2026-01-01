@@ -1313,6 +1313,27 @@ void Perl_Client_ResetAlternateAdvancementRank(Client* self, int aa_id) // @cate
 	return self->ResetAlternateAdvancementRank(aa_id);
 }
 
+// Kraqur: Perl binding for sending full AA stat packet to the client.
+// Exposes Client::SendAlternateAdvancementStats() to Perl.
+void Perl_Client_SendAlternateAdvancementStats(Client* self) // @categories Alternative Advancement
+{
+	return self->SendAlternateAdvancementStats();
+}
+
+// Kraqur: Perl binding for sending AA point updates to the client.
+// Exposes Client::SendAlternateAdvancementPoints() to Perl.
+void Perl_Client_SendAlternateAdvancementPoints(Client* self) // @categories Alternative Advancement
+{
+	return self->SendAlternateAdvancementPoints();
+}
+
+// Kraqur: Perl binding for sending the full AA table to the client.
+// Exposes Client::SendAlternateAdvancementTable() to Perl.
+void Perl_Client_SendAlternateAdvancementTable(Client* self) // @categories Alternative Advancement
+{
+	return self->SendAlternateAdvancementTable();
+}
+
 uint32_t Perl_Client_GetAALevel(Client* self, uint32 aa_skill_id) // @categories Alternative Advancement, Experience and Level
 {
 	return self->GetAA(aa_skill_id);
@@ -2022,9 +2043,30 @@ bool Perl_Client_AddExtraClass(Client* self, int class_id)
 	return self->AddExtraClass(class_id);
 }
 
+// Kraqur: Perl binding for removing a single extra class from a multiclass character.
+// Calls Client::RemoveExtraClass(class_id).
+bool Perl_Client_RemoveExtraClass(Client* self, int class_id) {
+	return self ? self->RemoveExtraClass(class_id) : false;
+}
+
+// Kraqur: Perl binding for clearing all extra classes from a multiclass character.
+// Calls Client::RemoveAllExtraClasses().
+bool Perl_Client_RemoveAllExtraClasses(Client* c) {
+	return c ? c->RemoveAllExtraClasses() : false;
+}
+
+// Kraqur: Perl binding for retrieving the player's race bitmask.
+// Uses GetPlayerRaceBit(self->GetBaseRace()).
 uint32_t Perl_Client_GetRaceBitmask(Client* self) // @categories Stats and Attributes
 {
 	return GetPlayerRaceBit(self->GetBaseRace());
+}
+
+// Kraqur: Perl binding for checking if the client is flagged as seasonal.
+// Calls Client::IsSeasonal().
+bool Perl_Client_IsSeasonal(Client* self)
+{
+	return self->IsSeasonal();
 }
 
 perl::array Perl_Client_GetLearnableDisciplines(Client* self)
@@ -3108,6 +3150,8 @@ int Perl_Client_GetEXPPercentage(Client* self)
 	return self->GetEXPPercentage();
 }
 
+// Kraqur: Register multiclass and AA helper bindings for Perl access.
+// Extra class management, seasonal flag, and AA table senders.
 void perl_register_client()
 {
 	perl::interpreter perl(PERL_GET_THX);
@@ -3272,6 +3316,9 @@ void perl_register_client()
 	package.add("GetClassBitmask", &Perl_Client_GetClassBitmask);
 	package.add("GetClassesBitmask", &Perl_Client_GetClassesBitmask);
 	package.add("AddExtraClass", (bool(*)(Client*, int))&Perl_Client_AddExtraClass);
+	package.add("RemoveExtraClass", &Perl_Client_RemoveExtraClass);
+	package.add("RemoveAllExtraClasses", &Perl_Client_RemoveAllExtraClasses);
+	package.add("IsSeasonal", &Perl_Client_IsSeasonal);
 	package.add("GetClientMaxLevel", &Perl_Client_GetClientMaxLevel);
 	package.add("GetClientVersion", &Perl_Client_GetClientVersion);
 	package.add("GetClientVersionBit", &Perl_Client_GetClientVersionBit);
@@ -3491,6 +3538,9 @@ void perl_register_client()
 	package.add("ResetAllDisciplineTimers", &Perl_Client_ResetAllDisciplineTimers);
 	package.add("ResetAllCastbarCooldowns", &Perl_Client_ResetAllCastbarCooldowns);
 	package.add("ResetAlternateAdvancementRank", &Perl_Client_ResetAlternateAdvancementRank);
+	package.add("SendAlternateAdvancementStats", &Perl_Client_SendAlternateAdvancementStats);
+	package.add("SendAlternateAdvancementPoints", &Perl_Client_SendAlternateAdvancementPoints);
+	package.add("SendAlternateAdvancementTable", &Perl_Client_SendAlternateAdvancementTable);
 	package.add("ResetCastbarCooldownBySlot", &Perl_Client_ResetCastbarCooldownBySlot);
 	package.add("ResetCastbarCooldownBySpellID", &Perl_Client_ResetCastbarCooldownBySpellID);
 	package.add("ResetDisciplineTimer", &Perl_Client_ResetDisciplineTimer);
