@@ -38,6 +38,8 @@ extern WorldServer worldserver;
 extern TaskManager *task_manager;
 extern FastMath g_Math;
 void CatchSignal(int sig_num);
+// Forward declaration for our new GM command
+void command_respawn(Client* c, const Seperator* sep);
 
 
 int                                                           command_count; // how many commands we have
@@ -239,7 +241,8 @@ int command_init(void)
 		command_add("zonebootup", "[ZoneServerID] [shortname] - Make a zone server boot a specific zone", AccountStatus::GMLeadAdmin, command_zonebootup) ||
 		command_add("zoneinstance", "[Instance ID] [X] [Y] [Z] - Teleport to specified Instance by ID (coordinates are optional)", AccountStatus::Guide, command_zone_instance) ||
 		command_add("zoneshutdown", "[shortname] - Shut down a zone server", AccountStatus::GMLeadAdmin, command_zoneshutdown) ||
-		command_add("zsave", " Saves zheader to the database", AccountStatus::QuestTroupe, command_zsave)
+		command_add("zsave", " Saves zheader to the database", AccountStatus::QuestTroupe, command_zsave) ||
+		command_add("respawn", "[seconds] - Override respawn timer for Respawning Instances, 0 resets timer to default", AccountStatus::Player, command_respawn)
 	) {
 		command_deinit();
 		return -1;
@@ -778,6 +781,65 @@ void command_bot(Client *c, const Seperator *sep)
 		c->Message(Chat::Red, "Bots are disabled on this server.");
 	}
 }
+
+// Kraqur: Added #respawn command. Integrates with respawn_override logic added
+// in previous commits (zone.cpp, zone.h, spawn2.cpp). Allows the owner of a
+// Respawning Instance to override or reset NPC respawn timers.
+void command_respawn(Client* c, const Seperator* sep)
+{
+	if (!sep || !sep->IsNumber(1)) {
+		c->Message(Chat::White, "Usage: #respawn <seconds>");
+		return;
+	}
+
+	int seconds = atoi(sep->arg[1]);
+	if (seconds < 0) {
+		c->Message(Chat::White, "Respawn override must be >= 0 seconds.");
+		return;
+	}
+
+	extern Zone* zone;
+	if (!zone) {
+		c->Message(Chat::White, "No active zone context.");
+		return;
+	}
+
+	// First check: are we even in an instance?
+	if (zone->GetInstanceID() == 0) {
+		c->Message(Chat::Yellow, "You need to que up a (Respawning Instance) from (Echo of the Past)");
+		return;
+	}
+
+	// Second check: is this instance a farming one?
+	if (zone->GetInstanceVersion() == RuleI(Custom, FarmingInstanceVersion)) {
+		// Ownership check: only the leader/owner of the instance can change respawn settings
+		auto dz = zone->GetDynamicZone();
+		if (dz && dz->GetLeaderID() != c->CharacterID()) {
+			c->Message(Chat::Yellow, "Only the owner of this Respawning Instance can change respawn settings.");
+			return;
+		}
+
+		zone->respawn_override = seconds;
+		if (seconds == 0) {
+			c->Message(Chat::Yellow, "Respawn override cleared. NPCs will now use their default respawn timers.");
+		}
+		else {
+			c->Message(Chat::Yellow, "Respawn override set to %d seconds for this Respawning Instance.", seconds);
+		}
+	}
+	else {
+		if (zone->GetInstanceID() == 0) {
+			c->Message(Chat::Yellow, "You do not have a Respawning Instance. See Echo of the Past to get one");
+		}
+		else {
+			c->Message(Chat::Yellow, "Respawn override only applies to Respawning Instances from Echo of the Past.");
+		}
+	}
+}
+
+
+
+
 
 #include "gm_commands/acceptrules.cpp"
 #include "gm_commands/advnpcspawn.cpp"
