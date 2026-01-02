@@ -11080,7 +11080,7 @@ void Client::Handle_OP_PetCommands(const EQApplicationPacket* app)
 
 			if (!pet->IsAttackAllowed(GetTarget())) {
 				pet->SayString(this, NOT_LEGAL_TARGET);
-				continue;PET_BACKOFF
+				continue; // could be exploited like PET_BACKOFF
 			}
 
 			if ((pet->GetPetType() == petAnimation && aabonuses.PetCommands[PET_QATTACK]) ||
