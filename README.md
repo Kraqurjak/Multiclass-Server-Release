@@ -1,10 +1,145 @@
 # Multiclass-Server
-* This server is a custom server thats attempting to add the multiclass features that where present on THJ
-* [Install Guide] You will need to download the RoF2 client from steam or other recourse.
-* All files needed including Peq Database,  Servers Change log, and Readme.txt are in here.
-* You can also get the client files in the release section. If you have issues read the Readme file in assets directory for more information and exact links.
 
-***
+A custom EverQuest server project attempting to recreate and expand the multiclass features originally found on THJ.
+
+These files include everything needed for both the client and server:
+
+* Multiclass-Server-Client-Files.rar
+* Server-Packet.rar  
+
+For detailed installation instructions, see:
+
+* Readme!!.txt in the Assets folder  
+* The installation guide below  
+
+---
+
+## Multiclass Server Installation Guide
+
+---
+
+### 1. PEQ Database Setup
+
+**PEQ Backup Location**
+
+The PEQ backup file is located in the Assets folder of your server files:
+
+* thj_peq_backup.sql
+
+**Importing the Database**
+
+1. Open a Command Prompt.
+2. Navigate to the folder containing thj_peq_backup.sql.
+3. Run the following commands:
+
+```bash
+mysql -u root -p -e "CREATE DATABASE thj_peq;"
+mysql -u root -p thj_peq < thj_peq_backup.sql
+```
+
+**Login Credentials**
+
+For out-of-the-box compatibility, use:
+
+* user: root  
+* password: root  
+
+If you choose a different password, update it in the following files:
+
+* eqemu_config.json  
+* login.json  
+* quests\migrate_bags.pl  
+* quests\migrate_items.pl  
+
+---
+
+### 2. Client Setup
+
+**Download the Client Files**
+
+Download the Multiclass-Server Client Files from the GitHub release page:
+
+https://github.com/Kraqurjak/Multiclass-Server-Release/releases/tag/V1.0
+
+**Install the RoF2 Client**
+
+* Download the RoF2 client from Steam or another source.  
+* Exact links cannot be provided for copyright reasons.
+
+**Apply the Multiclass Client Files**
+
+1. Extract Multiclass-Server.Client.Files.rar.
+2. Copy the extracted files into your RoF2 directory.
+3. Overwrite all files when prompted.
+
+**Configure eqhost.txt**
+
+If you are running locally, use:
+
+```text
+[LoginServer]
+Host=127.0.0.1:5999
+```
+
+If you are connecting remotely, change Host to match your server's IP and port.
+
+Your client is now ready.
+
+---
+
+### 3. Server Setup
+
+**Download the Server Packet**
+
+Download the server package from the release page:
+
+https://github.com/Kraqurjak/Multiclass-Server-Release/releases/tag/V1.0
+
+This package includes:
+
+* quests  
+* plugins  
+* spire  
+* all required server scripts  
+
+**Build the Server**
+
+1. Run CMake to generate project files.
+2. Compile the server in Release mode using Visual Studio.
+3. Copy your compiled bin folder into the Server-Packet directory.
+
+**Important: zlib-ng1.dll**
+
+* Do not overwrite the zlib-ng1.dll included in the Server-Packet.  
+* The server requires zlib-ng1.dll to run.
+
+A backup copy is included in:
+
+* Server-Packet/zlib-ng1 Backup/
+
+If you delete or overwrite it, copy the backup into your bin directory.
+
+**Final Step**
+
+* Run the server executables (or Spire).  
+* If your database and configuration files are correct, the server should start normally.
+
+---
+
+### Additional Notes
+
+If you do not know how to compile the server, precompiled binaries are provided:
+
+* Compiled-Server.rar
+
+Place the contents of this archive into the bin folder inside the Server-Packet directory.
+
+This is not required if you are compiling your own server.
+
+---
+---
+---
+
 
 # EQEmulator Core Server
 | Drone (Linux x64) | Drone (Windows x64)   |
