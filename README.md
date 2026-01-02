@@ -1,3 +1,11 @@
+# Multiclass-Server
+* This server is a custom server thats attempting to add the multiclass features that where present on THJ
+* [Install Guide] You will need to download the RoF2 client from steam or other recourse.
+* All files needed including Peq Database,  Servers Change log, and Readme.txt are in here.
+* You can also get the client files in the release section. If you have issues read the Readme file in assets directory for more information and exact links.
+
+***
+
 # EQEmulator Core Server
 | Drone (Linux x64) | Drone (Windows x64)   |
 |:---:|:---:|
